@@ -47,3 +47,9 @@ next-env.d.ts
 /test-results/
 /playwright-report/
 /playwright/.cache/
+
+# Tests stay local-only (not pushed to GitHub)
+/tests/
+/vitest.config.mts
+/vitest.setup.ts
+/playwright.config.ts
