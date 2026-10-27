@@ -1,108 +1,228 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CircleCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
+import type {
+  ApiErrorBody,
+  ConfiguredSource,
+  ResearchRun,
+  StartRunResponse,
+} from "@/features/research/types";
+import { AddSourceDialog } from "./add-source-dialog";
 import { ArticleReview } from "./article-review";
+import { CandidateReview } from "./candidate-review";
 import { DashboardSummary } from "./dashboard-summary";
+import { DEFAULT_SOURCES, type ResearchStatus, sourceDomain } from "./data";
 import { NewsSources } from "./news-sources";
 import { ResearchControls } from "./research-controls";
-import { DEFAULT_SOURCES, SAMPLE_ARTICLE, type Article, type ResearchStatus } from "./data";
+import { ResearchFeed, ResearchPanel } from "./research-panel";
+import { ResearchProgress } from "./research-progress";
 
-const DEMO_RESEARCH_MS = 2000;
+const POLL_INTERVAL_MS = 2_000;
+/** Client gives up polling after this long (the server stops starting new work at 8 min). */
+const MAX_POLL_MS = 12 * 60_000;
+const MAX_POLL_FAILURES = 3;
 
-type DialogState = { kind: "publish"; article: Article } | { kind: "add-source" } | null;
+const INITIAL_SOURCES: ConfiguredSource[] = DEFAULT_SOURCES.map((s) => ({
+  id: s.id,
+  name: s.name,
+  url: s.url,
+  domain: sourceDomain(s),
+  isPrimarySource: s.isPrimarySource ?? false,
+  enabled: s.enabled,
+}));
 
-/** Frontend-only demo: all state is local; nothing is fetched, saved or published. */
+type DialogState = "publish" | "add-source" | null;
+
+async function readError(response: Response, fallback: string): Promise<string> {
+  const body = (await response.json().catch(() => null)) as ApiErrorBody | null;
+  return body?.error?.message ?? fallback;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Research state lives on the server in memory; nothing is persisted, published or sent to lemonn.co.in. */
 export function Dashboard() {
-  const [sources, setSources] = useState(DEFAULT_SOURCES);
+  const [sources, setSources] = useState<ConfiguredSource[]>(INITIAL_SOURCES);
   const [researchStatus, setResearchStatus] = useState<ResearchStatus>("idle");
-  const [articles, setArticles] = useState<readonly Article[]>([]);
+  const [run, setRun] = useState<ResearchRun | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const mounted = useRef(false);
 
-  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => {
+    mounted.current = true;
+    // Sync with the server's source list (sources added/removed earlier in this server session).
+    fetch("/api/sources")
+      .then((r) => (r.ok ? (r.json() as Promise<{ sources: ConfiguredSource[] }>) : null))
+      .then((data) => {
+        if (!data || !mounted.current) return;
+        setSources((current) => {
+          const enabled = new Map(current.map((s) => [s.id, s.enabled]));
+          return data.sources.map((s) => ({ ...s, enabled: enabled.get(s.id) ?? s.enabled }));
+        });
+      })
+      .catch(() => {});
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const enabledSources = sources.filter((s) => s.enabled).length;
-  const readyToPublish = articles.filter((a) => a.status === "ready").length;
+  const running = researchStatus === "running";
 
   function toggleSource(id: string, enabled: boolean) {
     setSources((prev) => prev.map((s) => (s.id === id ? { ...s, enabled } : s)));
   }
 
-  function runDemoResearch() {
-    if (researchStatus === "running") return;
-    setResearchStatus("running");
-    timer.current = setTimeout(() => {
-      setResearchStatus("done");
-      setArticles([SAMPLE_ARTICLE]);
-    }, DEMO_RESEARCH_MS);
+  async function removeSource(source: ConfiguredSource) {
+    const response = await fetch(`/api/sources/${encodeURIComponent(source.id)}`, {
+      method: "DELETE",
+    }).catch(() => null);
+    if (response?.ok || response?.status === 404) {
+      setSources((prev) => prev.filter((s) => s.id !== source.id));
+    } else {
+      setError(
+        response
+          ? await readError(response, "Could not remove the source.")
+          : "Could not reach the server.",
+      );
+    }
   }
+
+  async function runResearch() {
+    if (running) return;
+    setResearchStatus("running");
+    setError(null);
+    setRun(null);
+    try {
+      const start = await fetch("/api/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sources: sources.map(({ id, enabled }) => ({ id, enabled })) }),
+      });
+      if (!start.ok) throw new Error(await readError(start, `Research failed (${start.status}).`));
+      const { runId } = (await start.json()) as StartRunResponse;
+
+      // Poll for progress until the run finishes.
+      const startedAt = Date.now();
+      let failures = 0;
+      while (mounted.current) {
+        await sleep(POLL_INTERVAL_MS);
+        if (Date.now() - startedAt > MAX_POLL_MS) {
+          throw new Error("Research is taking too long. Check again later.");
+        }
+        const response = await fetch(`/api/research/${runId}`).catch(() => null);
+        if (!response?.ok) {
+          if (response?.status === 404)
+            throw new Error(await readError(response, "The run was lost."));
+          if (++failures >= MAX_POLL_FAILURES) {
+            throw new Error("Lost contact with the server while researching.");
+          }
+          continue;
+        }
+        failures = 0;
+        const snapshot = (await response.json()) as ResearchRun;
+        if (!mounted.current) return;
+        setRun(snapshot);
+        if (snapshot.stage === "failed")
+          throw new Error(snapshot.error?.message ?? "Research failed.");
+        if (snapshot.stage === "completed") {
+          setResearchStatus("done");
+          return;
+        }
+      }
+    } catch (e) {
+      if (!mounted.current) return;
+      setError(e instanceof Error && e.message ? e.message : "Research failed. Please try again.");
+      setResearchStatus("error");
+    }
+  }
+
+  const drafts = run?.drafts ?? [];
 
   return (
     <>
+      {/* Hero: title on the left, primary action on the right. */}
       <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <Badge variant="warning">Demo · Backend not connected</Badge>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
+          <Badge variant="warning">Prototype · Results not saved</Badge>
+          <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
             News Research Dashboard
           </h1>
-          <p className="mt-1.5 max-w-xl text-sm text-muted-foreground sm:text-base">
+          <p className="mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
             Manage news sources, research market developments, and prepare articles for publication.
           </p>
         </div>
         <ResearchControls
           status={researchStatus}
           enabledSources={enabledSources}
-          onResearch={runDemoResearch}
+          onResearch={runResearch}
+          className="shrink-0"
         />
-      </div>
-
-      <div role="status" aria-live="polite">
-        {researchStatus === "done" && (
-          <p className="flex items-start gap-2 rounded-lg border border-success/25 bg-success-soft px-4 py-3 text-sm text-success">
-            <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
-            Demo research completed. Backend integration is not connected, so no real news was
-            collected.
-          </p>
-        )}
       </div>
 
       <DashboardSummary
         totalSources={sources.length}
         enabledSources={enabledSources}
         researchStatus={researchStatus}
-        readyToPublish={readyToPublish}
+        readyToPublish={0}
+        draftCount={drafts.length}
       />
 
-      <NewsSources
-        sources={sources}
-        onToggle={toggleSource}
-        onAddSource={() => setDialog({ kind: "add-source" })}
-      />
+      {researchStatus !== "error" && error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
 
-      <ArticleReview
-        articles={articles}
-        onPublish={(article) => setDialog({ kind: "publish", article })}
-      />
+      {/* Main column + sticky right panel (stacks on smaller screens). */}
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start">
+        <aside className="flex flex-col gap-5 xl:sticky xl:top-24 xl:order-last">
+          <ResearchPanel
+            status={researchStatus}
+            run={run}
+            error={error}
+            enabledSources={enabledSources}
+            totalSources={sources.length}
+            onResearch={runResearch}
+          />
+          <ResearchFeed run={run} />
+        </aside>
+
+        <div className="flex min-w-0 flex-col gap-5">
+          {run && <ResearchProgress run={run} />}
+          <NewsSources
+            sources={sources}
+            onToggle={toggleSource}
+            onAddSource={() => setDialog("add-source")}
+            onRemove={removeSource}
+            disabled={running}
+          />
+          {run && <CandidateReview candidates={run.candidates} />}
+          <ArticleReview
+            drafts={drafts}
+            hasRun={researchStatus === "done"}
+            onPublish={() => setDialog("publish")}
+          />
+        </div>
+      </div>
 
       <Dialog
-        open={dialog?.kind === "publish"}
+        open={dialog === "publish"}
         onClose={() => setDialog(null)}
-        title="Publishing is a demo"
+        title="Publishing is not connected"
       >
         No article has been published. Publishing to the Lemonn website is not connected yet, and
-        nothing was sent anywhere.
+        this draft was not sent anywhere. It stays private in this prototype.
       </Dialog>
-      <Dialog
-        open={dialog?.kind === "add-source"}
+      <AddSourceDialog
+        open={dialog === "add-source"}
+        sourceCount={sources.length}
         onClose={() => setDialog(null)}
-        title="Adding sources is not available yet"
-      >
-        Source management will be saved once the backend is connected. For now, use the toggles to
-        choose which of the 10 starting sources to include.
-      </Dialog>
+        onAdded={(source) => setSources((prev) => [...prev, source])}
+      />
     </>
   );
 }
