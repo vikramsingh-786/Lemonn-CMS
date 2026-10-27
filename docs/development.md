@@ -1,0 +1,77 @@
+# Development
+
+## Prerequisites
+
+- Node.js ≥ 20.9
+- pnpm 10 (`corepack enable`), or run any command as `npx pnpm@10.34.7 <script>`
+- PostgreSQL only when working on database features; building and running the app don't need it
+
+## First-time setup
+
+```bash
+pnpm install                          # also runs `prisma generate`
+cp .env.example .env                  # fill in local values
+pnpm exec playwright install chromium # only needed for e2e tests
+pnpm dev                              # http://localhost:3000
+```
+
+## Scripts
+
+| Script              | What it does                                   |
+| ------------------- | ---------------------------------------------- |
+| `pnpm dev`          | Start the dev server                           |
+| `pnpm build`        | Production build                               |
+| `pnpm start`        | Serve the production build                     |
+| `pnpm lint`         | ESLint                                         |
+| `pnpm typecheck`    | Generate route types and run `tsc --noEmit`    |
+| `pnpm format`       | Format with Prettier                           |
+| `pnpm format:check` | Check formatting                               |
+| `pnpm test`         | Unit tests (Vitest)                            |
+| `pnpm test:watch`   | Unit tests in watch mode                       |
+| `pnpm test:e2e`     | E2E tests (Playwright; starts the dev server)  |
+| `pnpm check`        | typecheck + lint + format:check + test         |
+| `pnpm db:generate`  | Regenerate the Prisma client                   |
+| `pnpm db:migrate`   | Create/apply migrations on your local database |
+
+## Environment variables
+
+| Variable       | Needed for                  | Notes                                              |
+| -------------- | --------------------------- | -------------------------------------------------- |
+| `DATABASE_URL` | Prisma CLI, database access | The CMS's own PostgreSQL. Never Lemonn production. |
+
+All variables are server-only. Validate new ones in `src/lib/env.ts` and add a placeholder to
+`.env.example`.
+
+## Database
+
+- Schema: `prisma/schema.prisma`. Config: `prisma.config.ts` (loads `.env` automatically).
+- After editing the schema: `pnpm db:migrate` (needs a local database), then commit the migration.
+- The generated client lives in `src/generated/prisma` and is not committed.
+
+## Testing
+
+- Unit tests go in `tests/unit/` (or next to code as `*.test.ts`), run in jsdom with
+  Testing Library matchers available.
+- E2E tests go in `tests/e2e/`. Playwright starts `pnpm dev` automatically.
+
+## Adding UI components
+
+```bash
+pnpm dlx shadcn@latest add button
+```
+
+If the company npm mirror blocks the CLI, copy the component source from ui.shadcn.com into
+`src/components/ui/` and install its listed dependencies.
+
+## Troubleshooting
+
+- **`pnpm` crashes with `ERR_MODULE_NOT_FOUND`**: the global install is broken. Use
+  `npx pnpm@10.34.7 ...` or reinstall pnpm.
+- **Install fails with 403 / ETARGET**: the company mirror hasn't released that version yet.
+  Pin to an older version (see `overrides` in `pnpm-workspace.yaml`).
+
+## Before opening a PR
+
+```bash
+pnpm check && pnpm build
+```

@@ -1,0 +1,11 @@
+// Prisma schema for Lemonn News CMS. Models will be added in a later phase.
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}

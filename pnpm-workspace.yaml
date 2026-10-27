@@ -1,0 +1,8 @@
+allowBuilds:
+  sharp: false
+  unrs-resolver: false
+  prisma: true
+  "@prisma/engines": true
+overrides:
+  # Company npm mirror quarantines the newest vite release; pin the latest it serves.
+  vite: 8.3.4
