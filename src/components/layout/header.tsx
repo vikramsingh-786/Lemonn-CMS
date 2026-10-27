@@ -1,52 +1,67 @@
 import Link from "next/link";
 import { UserRound } from "lucide-react";
 import { BrandMark } from "@/components/layout/brand";
+import { NAV_ITEMS } from "@/components/layout/nav";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { cn } from "@/lib/utils";
 
-const NAV_ITEMS = [
-  { label: "Dashboard", href: "/", current: true },
-  { label: "Research", href: "#sources", current: false },
-  { label: "Articles", href: "#articles", current: false },
-] as const;
+const PILL =
+  "pill-raised flex items-center gap-2.5 rounded-full bg-card py-1.5 pr-4 pl-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
 
 export function Header() {
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-8 gap-y-2 px-4 py-3 sm:px-6">
-        <Link
-          href="/"
-          className="flex items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
+    <header className="header-surface sticky top-0 z-40">
+      <div className="mx-auto flex max-w-[1600px] items-center gap-2 px-3 py-3 sm:gap-3 sm:px-6">
+        <Link href="/" className={PILL}>
           <BrandMark />
           <span className="flex flex-col leading-tight">
-            <span className="text-sm font-semibold tracking-tight">Lemonn Newsroom</span>
-            <span className="text-xs text-muted-foreground">Financial News CMS</span>
+            <span className="font-display text-sm font-semibold tracking-tight">
+              Lemonn Newsroom
+            </span>
+            <span className="text-[11px] text-muted-foreground">Financial News CMS</span>
           </span>
         </Link>
 
-        {/* Mobile: drops to a full-width row under the brand. Desktop: inline. */}
-        <nav aria-label="Main" className="order-last -mx-2 w-full sm:order-none sm:mx-0 sm:w-auto">
-          <ul className="flex gap-1">
-            {NAV_ITEMS.map((item) => (
-              <li key={item.label}>
+        <nav aria-label="Main" className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none]">
+          <ul className="flex gap-2">
+            {NAV_ITEMS.map(({ label, href, icon: Icon, current }) => (
+              <li key={label}>
                 <Link
-                  href={item.href}
-                  aria-current={item.current ? "page" : undefined}
-                  className="block rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[current=page]:bg-muted aria-[current=page]:font-medium aria-[current=page]:text-foreground"
+                  href={href}
+                  aria-current={current ? "page" : undefined}
+                  className={cn(
+                    PILL,
+                    "text-sm whitespace-nowrap text-muted-foreground hover:text-foreground aria-[current=page]:text-foreground",
+                  )}
                 >
-                  {item.label}
+                  <span
+                    className={cn(
+                      "pill-raised grid size-8 place-items-center rounded-full",
+                      current ? "bg-primary text-primary-foreground" : "bg-muted",
+                    )}
+                  >
+                    <Icon aria-hidden className="size-4" />
+                  </span>
+                  <span className="hidden sm:inline">{label}</span>
+                  <span className="sr-only sm:hidden">{label}</span>
                 </Link>
               </li>
             ))}
           </ul>
         </nav>
 
+        <span className="pill-raised hidden items-center gap-2 rounded-full bg-card py-2 pr-4 pl-3 text-xs text-muted-foreground md:flex">
+          <span aria-hidden className="size-2 rounded-full bg-hot" />
+          Prototype
+        </span>
+        <ThemeToggle />
         <span
           role="img"
           aria-label="Admin profile (sign-in not configured yet)"
           title="Sign-in not configured yet"
-          className="ml-auto grid size-8 place-items-center rounded-full border border-border bg-card text-muted-foreground"
+          className="pill-raised grid size-11 shrink-0 place-items-center rounded-full bg-card text-muted-foreground"
         >
-          <UserRound className="size-4" aria-hidden />
+          <UserRound className="size-5" aria-hidden />
         </span>
       </div>
     </header>

@@ -2,9 +2,13 @@
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant light (&:where([data-theme="light"], [data-theme="light"] *));
 
 @theme inline {
   --color-background: var(--background);
+  --color-canvas: var(--canvas);
+  --color-hot: var(--hot);
+  --font-display: var(--font-outfit);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-success: var(--success);
@@ -50,45 +54,140 @@
 }
 
 :root {
-  /* Lemonn Newsroom — light, editorial palette */
-  --radius: 0.5rem;
-  --background: #fafaf7;
-  --foreground: #17191c;
-  --card: #ffffff;
-  --card-foreground: #17191c;
-  --popover: #ffffff;
-  --popover-foreground: #17191c;
-  --primary: #17191c;
-  --primary-foreground: #ffffff;
-  --secondary: #f1f1ec;
-  --secondary-foreground: #17191c;
-  --muted: #f1f1ec;
-  --muted-foreground: #5f6368;
-  --accent: #f1f1ec;
-  --accent-foreground: #17191c;
-  --destructive: #b42318;
-  --border: #e4e4df;
-  --input: #b9bab4;
-  --ring: #1f7a4d;
+  /* Lemonn Newsroom — dark "control room" palette (inspired by modern Web3 dashboards) */
+  color-scheme: dark;
+  --radius: 1.75rem;
+  --background: #171b22; /* page */
+  --canvas: rgb(31 36 45 / 0.82); /* main frame: lets the grid show through faintly */
+  --foreground: #eef1f5;
+  --card: #272d38;
+  --card-foreground: #eef1f5;
+  --popover: #272d38;
+  --popover-foreground: #eef1f5;
+  --primary: #f4907f; /* coral */
+  --primary-foreground: #171b22;
+  --secondary: #323947;
+  --secondary-foreground: #eef1f5;
+  --muted: #323947; /* pills */
+  --muted-foreground: #a3acba;
+  --accent: #323947;
+  --accent-foreground: #eef1f5;
+  --destructive: #ff8a80;
+  --border: #323947;
+  --input: #4b5465;
+  --ring: #f4907f;
   --brand: #f2d23c;
-  --brand-foreground: #17191c;
-  --success: #1f7a4d;
-  --success-soft: #e8f3ec;
-  --warning: #7a5b00;
-  --warning-soft: #fff6d6;
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: #ffffff;
-  --sidebar-foreground: #17191c;
-  --sidebar-primary: #17191c;
+  --brand-foreground: #171b22;
+  --hot: #f2683c; /* orange highlight */
+  --success: #4ade80;
+  --success-soft: #213a2e;
+  --warning: #fbc177;
+  --warning-soft: #3a3124;
+  --chart-1: #f4907f;
+  --chart-2: #4ade80;
+  --chart-3: #60a5fa;
+  --chart-4: #f2d23c;
+  --chart-5: #f2683c;
+  --sidebar: #272d38;
+  --sidebar-foreground: #eef1f5;
+  --sidebar-primary: #f4907f;
+  --sidebar-primary-foreground: #171b22;
+  --sidebar-accent: #323947;
+  --sidebar-accent-foreground: #eef1f5;
+  --sidebar-border: #323947;
+  --sidebar-ring: #f4907f;
+  /* 3D buttons: face gradient, solid base (depth) and glow */
+  --btn-primary-top: #f9ad9f;
+  --btn-primary-bottom: #ef7f6b;
+  --btn-primary-base: #a9493a;
+  --btn-neutral-top: #414a5a;
+  --btn-neutral-bottom: #343b49;
+  --btn-neutral-base: #161a21;
+  --btn-highlight: rgb(255 255 255 / 0.45);
+  --btn-neutral-highlight: rgb(255 255 255 / 0.1);
+  /* Subtle depth for surfaces/pills (much lighter than buttons) */
+  --raise-highlight: rgb(255 255 255 / 0.07);
+  --raise-base: #161a21;
+  --raise-shadow: rgb(0 0 0 / 0.55);
+  --raise-sheen: rgb(255 255 255 / 0.035);
+  --well-shadow: rgb(0 0 0 / 0.45);
+  --grid-line: rgb(255 255 255 / 0.06);
+  /* Theme cursor: accent arrow with white outline; a dot marks clickable things. */
+  --cursor-default:
+    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='26'%20height='26'%20viewBox='0%200%2026%2026'%3E%3Cpath%20d='M4.037%204.688a.495.495%200%200%201%20.651-.651l16%206.5a.5.5%200%200%201-.063.947l-6.124%201.58a2%202%200%200%200-1.438%201.435l-1.579%206.126a.5.5%200%200%201-.947.063z'%20fill='%23f4907f'%20stroke='white'%20stroke-width='1.5'%20stroke-linejoin='round'/%3E%3C/svg%3E")
+      4 4,
+    auto;
+  --cursor-pointer:
+    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='26'%20height='26'%20viewBox='0%200%2026%2026'%3E%3Cpath%20d='M4.037%204.688a.495.495%200%200%201%20.651-.651l16%206.5a.5.5%200%200%201-.063.947l-6.124%201.58a2%202%200%200%200-1.438%201.435l-1.579%206.126a.5.5%200%200%201-.947.063z'%20fill='%23f4907f'%20stroke='white'%20stroke-width='1.5'%20stroke-linejoin='round'/%3E%3Ccircle%20cx='20'%20cy='20'%20r='3.25'%20fill='%23f4907f'%20stroke='white'%20stroke-width='1.5'/%3E%3C/svg%3E")
+      4 4,
+    pointer;
+}
+
+/* Light theme — same layout and pills, re-tuned for contrast on white. */
+:root[data-theme="light"] {
+  /* Light theme: lavender canvas with soft glows, navy ink, violet→magenta accent
+     (inspired by modern Web3 wallet UIs). */
+  color-scheme: light;
+  --page-wash:
+    radial-gradient(55% 45% at 0% 0%, #e6dcfd 0%, transparent 70%),
+    radial-gradient(45% 40% at 100% 5%, #fbdcf1 0%, transparent 70%),
+    radial-gradient(55% 55% at 85% 100%, #dde4ff 0%, transparent 70%),
+    linear-gradient(#f2f2fc, #f2f2fc);
+  --accent-gradient: linear-gradient(90deg, #5a46ef 0%, #9a4df1 55%, #e266d6 100%);
+  --background: #f2f2fc;
+  --canvas: rgb(250 249 255 / 0.6); /* frosted lavender container, like the dark frame */
+  --foreground: #1b1a3e;
+  --card: rgb(255 255 255 / 0.82);
+  --card-foreground: #1b1a3e;
+  --popover: #ffffff;
+  --popover-foreground: #1b1a3e;
+  --primary: #6d3df2; /* violet */
+  --primary-foreground: #ffffff;
+  --secondary: #f1eefd;
+  --secondary-foreground: #1b1a3e;
+  --muted: #f1eefd; /* lavender pills */
+  --muted-foreground: #64638a;
+  --accent: #f1eefd;
+  --accent-foreground: #1b1a3e;
+  --destructive: #c2263f;
+  --border: rgb(60 40 140 / 0.08);
+  --input: #c9c3ee;
+  --ring: #7c4df4;
+  --hot: #e05bd8; /* magenta */
+  --success: #13803e;
+  --success-soft: #d8f8e2; /* mint, like "+ $670" */
+  --warning: #8a5a00;
+  --warning-soft: #fff1d6;
+  --sidebar: rgb(255 255 255 / 0.82);
+  --sidebar-foreground: #1b1a3e;
+  --sidebar-primary: #6d3df2;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f1f1ec;
-  --sidebar-accent-foreground: #17191c;
-  --sidebar-border: #e4e4df;
-  --sidebar-ring: #1f7a4d;
+  --sidebar-accent: #f1eefd;
+  --sidebar-accent-foreground: #1b1a3e;
+  --sidebar-border: rgb(60 40 140 / 0.08);
+  --sidebar-ring: #7c4df4;
+  --btn-primary-top: #7d52f4;
+  --btn-primary-bottom: #6235e6;
+  --btn-primary-base: #4428b4;
+  --btn-neutral-top: #ffffff;
+  --btn-neutral-bottom: #f6f4fe;
+  --btn-neutral-base: #dcd6f7;
+  --btn-highlight: rgb(255 255 255 / 0.35);
+  --btn-neutral-highlight: rgb(255 255 255 / 1);
+  --raise-highlight: rgb(255 255 255 / 0.9);
+  --raise-base: rgb(0 0 0 / 0);
+  --raise-shadow: rgb(90 60 200 / 0.18);
+  --raise-sheen: rgb(255 255 255 / 0.6);
+  --well-shadow: rgb(70 50 160 / 0.08);
+  --grid-line: rgb(80 60 170 / 0.1);
+  --cursor-default:
+    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='26'%20height='26'%20viewBox='0%200%2026%2026'%3E%3Cpath%20d='M4.037%204.688a.495.495%200%200%201%20.651-.651l16%206.5a.5.5%200%200%201-.063.947l-6.124%201.58a2%202%200%200%200-1.438%201.435l-1.579%206.126a.5.5%200%200%201-.947.063z'%20fill='%236d3df2'%20stroke='white'%20stroke-width='1.5'%20stroke-linejoin='round'/%3E%3C/svg%3E")
+      4 4,
+    auto;
+  --cursor-pointer:
+    url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='26'%20height='26'%20viewBox='0%200%2026%2026'%3E%3Cpath%20d='M4.037%204.688a.495.495%200%200%201%20.651-.651l16%206.5a.5.5%200%200%201-.063.947l-6.124%201.58a2%202%200%200%200-1.438%201.435l-1.579%206.126a.5.5%200%200%201-.947.063z'%20fill='%236d3df2'%20stroke='white'%20stroke-width='1.5'%20stroke-linejoin='round'/%3E%3Ccircle%20cx='20'%20cy='20'%20r='3.25'%20fill='%236d3df2'%20stroke='white'%20stroke-width='1.5'/%3E%3C/svg%3E")
+      4 4,
+    pointer;
 }
 
 .dark {
@@ -125,6 +224,121 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/*
+ * Tactile 3D pill buttons: gradient face, top highlight, solid base showing depth, soft glow.
+ * Pressing sinks the face onto its base. --depth is set per size.
+ */
+@layer components {
+  .btn-3d {
+    --depth: 3px;
+    background: linear-gradient(to bottom, var(--face-top), var(--face-bottom));
+    box-shadow:
+      inset 0 1px 0 var(--face-highlight),
+      inset 0 -1px 0 rgb(0 0 0 / 0.05),
+      0 var(--depth) 0 var(--face-base),
+      0 calc(var(--depth) + 4px) 12px -8px color-mix(in srgb, var(--face-glow) 45%, transparent);
+    transition:
+      transform 120ms ease,
+      box-shadow 120ms ease,
+      filter 120ms ease;
+  }
+  .btn-3d:hover:not(:disabled) {
+    filter: brightness(1.05);
+  }
+  .btn-3d:active:not(:disabled) {
+    transform: translateY(calc(var(--depth) - 1px));
+    box-shadow:
+      inset 0 1px 0 var(--face-highlight),
+      inset 0 -1px 0 rgb(0 0 0 / 0.05),
+      0 1px 0 var(--face-base),
+      0 2px 6px -4px color-mix(in srgb, var(--face-glow) 45%, transparent);
+  }
+  .btn-3d-primary {
+    --face-top: var(--btn-primary-top);
+    --face-bottom: var(--btn-primary-bottom);
+    --face-base: var(--btn-primary-base);
+    --face-highlight: var(--btn-highlight);
+    --face-glow: var(--primary);
+  }
+  .btn-3d-neutral {
+    --face-top: var(--btn-neutral-top);
+    --face-bottom: var(--btn-neutral-bottom);
+    --face-base: var(--btn-neutral-base);
+    --face-highlight: var(--btn-neutral-highlight);
+    --face-glow: rgb(0 0 0 / 0.5);
+  }
+  /* Raised surface (cards, sections): faint top light, 3px base, soft drop. */
+  .surface-raised {
+    box-shadow:
+      inset 0 1px 0 var(--raise-highlight),
+      0 3px 0 var(--raise-base),
+      0 16px 32px -20px var(--raise-shadow);
+  }
+  /* Raised pill (labels, icon circles, badges, nav): sheen + 2px base. */
+  .pill-raised {
+    background-image: linear-gradient(to bottom, var(--raise-sheen), transparent 70%);
+    box-shadow:
+      inset 0 1px 0 var(--raise-highlight),
+      0 2px 0 var(--raise-base),
+      0 6px 12px -8px var(--raise-shadow);
+  }
+  /* Recessed well (value pills, switch tracks). */
+  .pill-inset {
+    box-shadow:
+      inset 0 2px 5px var(--well-shadow),
+      inset 0 -1px 0 var(--raise-highlight);
+  }
+  /* Light mode: primary 3D buttons get the violet→magenta gradient face. */
+  :root[data-theme="light"] .btn-3d-primary {
+    background:
+      linear-gradient(to bottom, rgb(255 255 255 / 0.22), transparent 55%), var(--accent-gradient);
+    --face-glow: #a04ff0;
+  }
+  /* Light mode: crisp hairline + soft lavender lift (no 3D ledge) on raised surfaces. */
+  :root[data-theme="light"] .surface-raised {
+    box-shadow:
+      0 0 0 1px rgb(21 24 38 / 0.05),
+      0 1px 2px rgb(40 30 80 / 0.04),
+      0 20px 44px -24px var(--raise-shadow);
+  }
+  /* Light mode: the main container gets a hairline edge, frost and soft lavender lift. */
+  :root[data-theme="light"] .app-canvas {
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.9),
+      0 0 0 1px rgb(60 40 140 / 0.06),
+      0 30px 60px -36px rgb(90 60 200 / 0.25);
+  }
+  /* Sticky header backdrop: the same fixed grid (and light wash) as the page, so it looks
+     seamless while hiding content scrolling underneath. */
+  .header-surface {
+    background-color: var(--background);
+    background-image:
+      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: center top;
+    background-attachment: fixed;
+  }
+  :root[data-theme="light"] .header-surface {
+    background-image:
+      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px), var(--page-wash);
+    background-size:
+      48px 48px,
+      48px 48px,
+      auto;
+    background-position:
+      center top,
+      center top,
+      0 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn-3d {
+      transition: none;
+    }
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -134,5 +348,36 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+  /* Simple theme-colored cursor (pure CSS; falls back to the system cursor). */
+  html {
+    cursor: var(--cursor-default);
+  }
+  :is(a[href], button:not(:disabled), [role="switch"], summary, label, select) {
+    cursor: var(--cursor-pointer);
+  }
+  :is(input, textarea, [contenteditable="true"]) {
+    cursor: text;
+  }
+  /* Background grid (both themes): full-page, fixed behind all content. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: center top;
+  }
+  :root[data-theme="light"] body {
+    background-image: var(--page-wash);
+    background-attachment: fixed;
+  }
+  /* Frosted glass for translucent light-mode surfaces. */
+  :root[data-theme="light"] .bg-card {
+    backdrop-filter: blur(14px) saturate(1.2);
   }
 }
