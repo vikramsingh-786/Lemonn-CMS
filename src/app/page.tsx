@@ -1,10 +1,15 @@
+import { Footer } from "@/components/layout/footer";
+import { Header } from "@/components/layout/header";
+import { Dashboard } from "@/features/dashboard/dashboard";
+
 export default function Home() {
   return (
-    <main className="mx-auto flex min-h-full max-w-2xl flex-1 flex-col justify-center gap-3 px-6 py-24">
-      <h1 className="text-3xl font-semibold tracking-tight">Lemonn News CMS</h1>
-      <p className="text-muted-foreground">
-        Project foundation is set up. CMS features will be built in a later phase.
-      </p>
-    </main>
+    <>
+      <Header />
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6 sm:py-10">
+        <Dashboard />
+      </main>
+      <Footer />
+    </>
   );
 }
