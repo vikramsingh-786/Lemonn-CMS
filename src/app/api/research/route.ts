@@ -31,7 +31,7 @@ function error(
   return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 }
 
-/** Validate the request, then start a background run: discovery (Step 3) + clean & rank (Step 4). */
+/** Validate the request, then start a background run: discover → clean & rank → verify. */
 export async function POST(request: Request) {
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return error(400, "invalid_request", "Invalid research request.");
@@ -47,7 +47,8 @@ export async function POST(request: Request) {
   const enabled = parsed.data.sources.filter((s) => s.enabled).map((s) => catalog.get(s.id)!);
   if (enabled.length === 0) return error(400, "invalid_request", "Enable at least one source.");
 
-  const { TAVILY_API_KEY, GEMINI_API_KEY, GEMINI_MODEL_FAST } = serverEnv();
+  const env = serverEnv();
+  const { TAVILY_API_KEY } = env;
   const tavilyOnly = enabled.filter(needsTavily);
   if (!TAVILY_API_KEY && tavilyOnly.length > 0) {
     return error(
@@ -59,12 +60,7 @@ export async function POST(request: Request) {
 
   const end = new Date();
   const start = new Date(end.getTime() - WINDOW_HOURS * 3_600_000);
-  const started = startRun(
-    enabled,
-    { start: start.toISOString(), end: end.toISOString() },
-    TAVILY_API_KEY,
-    { apiKey: GEMINI_API_KEY, model: GEMINI_MODEL_FAST },
-  );
+  const started = startRun(enabled, { start: start.toISOString(), end: end.toISOString() }, env);
   if (!started) return error(409, "busy", "A research run is already in progress.", true);
 
   after(started.work);

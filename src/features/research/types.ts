@@ -17,37 +17,92 @@ export type CandidateStatus =
   | "verifying"
   | "verified"
   | "partially_verified"
+  | "conflicting_evidence"
   | "unverified"
-  | "contradicted"
   | "verification_failed"
   | "irrelevant"
   | "not_processed";
 
-export type ClaimStatus = "supported" | "partially_supported" | "contradicted" | "unresolved";
+/**
+ * Decided by application code (the gate), never by the AI:
+ * verified = official page/PDF of the responsible organisation supports it and contains every figure;
+ * partially_verified = only secondary/snippet support, wrong organisation, or a figure not found;
+ * conflicting_evidence = credible evidence contradicts it; unverified = nothing establishes it
+ * (never means false); verification_failed = a provider failed or AI output was unusable.
+ */
+export type ClaimStatus =
+  "verified" | "partially_verified" | "conflicting_evidence" | "unverified" | "verification_failed";
 export type Materiality = "high" | "medium" | "low";
 
 export type EvidenceKind = "primary" | "secondary";
 
+export type EvidenceSourceType =
+  "official_filing" | "official_company" | "government_regulator" | "independent_news";
+
 export type EvidenceRecord = {
   id: string;
+  /** primary = official source; secondary = independent news (never enough to verify). */
   kind: EvidenceKind;
+  sourceType: EvidenceSourceType;
+  /** Organisation the evidence is about/from (the claim's authority for official sources). */
+  organisation: string;
   url: string;
   title: string;
   /** Hostname without www. */
   publisher: string;
   /** Tavily's estimate, when provided. */
   publishedAt: string | null;
-  /** Short excerpt of retrieved text (from Tavily; never generated). */
+  /** page = fetched page/PDF text; snippet = search snippet only. */
+  retrieval: "page" | "snippet";
+  retrievedAt: string;
+  /** ≤300 chars of retrieved text (never generated). Full text stays on the server. */
   excerpt: string;
+  /** Official source dated well before the story: it cannot confirm a new event. */
+  stale?: boolean;
 };
 
+export type ClaimType =
+  | "earnings"
+  | "product_launch"
+  | "partnership"
+  | "acquisition"
+  | "regulation"
+  | "leadership_change"
+  | "pricing"
+  | "ipo"
+  | "corporate_action"
+  | "macro"
+  | "market_movement"
+  | "other";
+
+export type DealStage =
+  "proposed" | "announced" | "approved" | "completed" | "cancelled" | "not_applicable";
+
+export type EvidenceRelation = "supports" | "contradicts" | "does_not_establish";
+
 export type ClaimAssessment = {
+  id: string;
   claim: string;
+  type: ClaimType;
   status: ClaimStatus;
   materiality: Materiality;
+  /** The one organisation that can confirm the claim. */
+  authority: string;
+  /** Numbers/dates as written in the story; all must appear in the official text to verify. */
+  figures: string[];
+  /** Deal stage the claim asserts (proposed … completed); checked against the official text. */
+  stage: DealStage;
+  links: { evidenceId: string; relation: EvidenceRelation }[];
   evidenceUrls: string[];
   explanation: string;
   gaps: string;
+};
+
+export type OfficialSourceCheck = {
+  entity: string;
+  domain: string | null;
+  status: "validated" | "rejected" | "not_found";
+  reason: string;
 };
 
 export type CandidateReport = {
@@ -76,6 +131,26 @@ export type CandidateReport = {
   /** Union of the cluster's topics. */
   topics: string[];
   screenedBy: "rules" | "rules+gemini";
+  /** Gemini screen: core fact is an official announcement (undefined when not screened). */
+  verifiable?: boolean;
+  /** Step 5: entities the story is about and the official domains checked for them. */
+  entities: string[];
+  officialSources: OfficialSourceCheck[];
+  /** Distinct publishers among secondary evidence after merging copies of the same report. */
+  independentSources: number;
+  /** Evidence + claim strength (null until verified); decides the draft queue order. */
+  verificationScore: number | null;
+  verificationScoreReasons: string[];
+};
+
+/** A story chosen for drafting (Step 6), best evidence first; at most DRAFT_TARGET. */
+export type DraftQueueItem = {
+  candidateId: string;
+  rank: number;
+  headline: string;
+  verificationScore: number;
+  readiness: DraftReadiness;
+  reason: string;
 };
 
 export type ExclusionReason =
@@ -158,6 +233,10 @@ export type RunCounts = {
   notProcessed: number;
   searchesUsed: number;
   aiCallsUsed: number;
+  /** Step 5 page/PDF fetches through safe-fetch. */
+  pagesAttempted: number;
+  pagesFetched: number;
+  pagesBlocked: number;
 };
 
 export type ResearchRun = {
@@ -178,6 +257,8 @@ export type ResearchRun = {
   topicCounts: Record<string, number>;
   /** Stories dropped while cleaning/ranking (Step 4). */
   excluded: ExcludedItem[];
+  /** Step 5 output: best-evidenced stories to draft, at most DRAFT_TARGET. */
+  draftQueue: DraftQueueItem[];
   counts: RunCounts;
   candidates: CandidateReport[];
   drafts: ResearchDraft[];

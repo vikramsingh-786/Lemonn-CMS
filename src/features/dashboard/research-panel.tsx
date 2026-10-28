@@ -27,15 +27,20 @@ const STEPS = [
   { key: "draft", label: "Draft", detail: "Verified stories only", icon: Sparkles },
 ] as const satisfies readonly { key: PipelineStep; [k: string]: unknown }[];
 
-/** Steps the server has built so far (Discover, Rank); the rest stay idle. */
-const BUILT_STEPS = 2;
+/** Steps the server has built so far (Discover → Verify); Draft stays idle. */
+const BUILT_STEPS = 4;
 
-/** Step states from the server's real current step (no invented progress). */
+/**
+ * Step states from the server's real current step (no invented progress). Evidence and Verify
+ * run together per story, so both are active while verifying.
+ */
 export function stepStates(status: ResearchStatus, run: ResearchRun | null): StepState[] {
   if (status === "done") return STEPS.map((_, i) => (i < BUILT_STEPS ? "done" : "idle"));
   if (status !== "running") return STEPS.map(() => "idle");
-  const current = STEPS.findIndex((step) => step.key === (run?.currentStep ?? "discover"));
-  return STEPS.map((_, i) => (i < current ? "done" : i === current ? "active" : "idle"));
+  const step = run?.currentStep ?? "discover";
+  const current = STEPS.findIndex((s) => s.key === (step === "verify" ? "evidence" : step));
+  const last = step === "verify" ? current + 1 : current;
+  return STEPS.map((_, i) => (i < current ? "done" : i <= last ? "active" : "idle"));
 }
 
 /** Live counts under Discover and Rank once there is data; later steps aren't built yet. */
@@ -51,6 +56,15 @@ function stepDetail(key: PipelineStep, fallback: string, run: ResearchRun | null
     return run.stage === "ranking"
       ? run.stageDetail
       : `${run.candidates.length} candidates · ${run.excluded.length} excluded`;
+  }
+  if (key === "evidence" || key === "verify") {
+    if (run.stage !== "processing" && run.counts.processed === 0) {
+      return run.stage === "completed" ? "Skipped (see warnings)" : fallback;
+    }
+    if (run.stage === "processing") return run.stageDetail;
+    return key === "evidence"
+      ? `${run.counts.pagesFetched} official pages read`
+      : `${run.counts.verified} verified · ${run.counts.held} held`;
   }
   return "Not started yet";
 }
@@ -156,9 +170,9 @@ export function ResearchPanel({
             <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
             <span>
               Ranked {run.candidates.length}{" "}
-              {run.candidates.length === 1 ? "candidate" : "candidates"} from {run.items.length}{" "}
-              discovered {run.items.length === 1 ? "story" : "stories"}. Verification and drafting
-              are not started yet.
+              {run.candidates.length === 1 ? "candidate" : "candidates"}; {run.counts.verified} of{" "}
+              {run.counts.processed} checked {run.counts.processed === 1 ? "story" : "stories"}{" "}
+              fully verified; {run.draftQueue.length} of {run.draftTarget} queued for drafting.
             </span>
           </p>
         )}

@@ -12,7 +12,7 @@ const STAGE_LABEL: Record<ResearchRun["stage"], string> = {
   discovering: "Discovering stories",
   expanding: "Expanding search",
   ranking: "Cleaning and ranking",
-  processing: "Verifying and drafting",
+  processing: "Verifying claims",
   completed: "Completed",
   failed: "Failed",
 };
@@ -34,6 +34,8 @@ const PROVIDER_LABEL: Record<string, string> = {
   gemini: "Gemini",
   tavily: "Tavily",
   sitemap: "sitemap",
+  fetch: "page fetch",
+  verify: "verification",
 };
 
 /** Live, honest view of what the run has actually done so far. */
@@ -46,6 +48,13 @@ export function ResearchProgress({ run }: { run: ResearchRun }) {
     ["Duplicates merged", counts.duplicatesRemoved],
     ["Excluded", run.excluded.length],
     ["Candidates", counts.uniqueCandidates],
+    ["Verified · held", `${counts.verified} · ${counts.held}`],
+    ["Not processed", counts.notProcessed],
+    ["Draft queue", `${run.draftQueue.length} / ${run.draftTarget}`],
+    [
+      "Pages read · blocked",
+      `${counts.pagesFetched}/${counts.pagesAttempted} · ${counts.pagesBlocked}`,
+    ],
     [
       "Sources OK",
       `${run.coverage.filter((c) => c.status === "ok").length} / ${run.coverage.length}`,

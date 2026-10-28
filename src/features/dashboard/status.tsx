@@ -10,17 +10,18 @@ const CANDIDATE: Record<CandidateStatus, [string, Variant]> = {
   verified: ["Verified", "success"],
   partially_verified: ["Partially verified", "warning"],
   unverified: ["Unverified", "neutral"],
-  contradicted: ["Contradicted", "warning"],
+  conflicting_evidence: ["Conflicting evidence", "warning"],
   verification_failed: ["Verification failed", "neutral"],
   irrelevant: ["Not relevant", "neutral"],
   not_processed: ["Not processed", "outline"],
 };
 
 const CLAIM: Record<ClaimStatus, [string, Variant]> = {
-  supported: ["Supported", "success"],
-  partially_supported: ["Partially supported", "warning"],
-  contradicted: ["Contradicted", "warning"],
-  unresolved: ["Unresolved", "neutral"],
+  verified: ["Verified", "success"],
+  partially_verified: ["Partially verified", "warning"],
+  conflicting_evidence: ["Conflicting evidence", "warning"],
+  unverified: ["Unverified", "neutral"],
+  verification_failed: ["Verification failed", "neutral"],
 };
 
 export function CandidateStatusBadge({ status }: { status: CandidateStatus }) {

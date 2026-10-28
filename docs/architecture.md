@@ -14,8 +14,13 @@ without one, searches Tavily. It keeps stories from the last 24 hours on 8 topic
 (`src/features/research/topics.ts`), at most 20 per source. Publisher fetches go through
 `src/lib/safe-fetch.ts`. Step 4 (`rank.ts`, weights in `rank-config.ts`) then drops undated and
 non-article items, merges duplicate reports, scores candidates with rules and, when
-`GEMINI_API_KEY` is set, adds a Gemini relevance screen (`gemini.ts`), falling back to rules only. There is still no database, queue, worker, auth, verification or drafting.
-Runs are lost on restart.
+`GEMINI_API_KEY` is set, adds a Gemini relevance screen (`gemini.ts`), falling back to rules only. Step 5 (`verify.ts`) checks the top candidates' material claims against
+the responsible organisation's official source (exchange filings, company or regulator site;
+domains resolved in `official-domains.ts`), reading pages/PDFs through `safe-fetch.ts` (`unpdf`
+for PDFs). Claim and story statuses are decided by application code (`gate()`), never by the AI. Verified stories are queued for drafting by an evidence score
+(`draft-score.ts`, at most `DRAFT_TARGET`). Runs are saved as local JSON in `.data/runs/`
+(`run-store.ts`, gitignored) so a refresh or restart keeps results;
+`POST /api/research/[runId]/verify` re-verifies only failed or unfinished stories. There is still no database, queue, worker, auth, verification or drafting.
 
 ## System boundaries
 
