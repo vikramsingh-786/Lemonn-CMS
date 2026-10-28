@@ -10,7 +10,7 @@ type ResearchControlsProps = {
   className?: string;
 };
 
-export function researchHint(enabledSources: number): string {
+function researchHint(enabledSources: number): string {
   return enabledSources === 0
     ? "Enable at least one source to research."
     : "Tavily search → evidence → Gemini verification → drafts.";

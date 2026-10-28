@@ -39,7 +39,7 @@ pnpm dev                              # http://localhost:3000
 | -------------- | --------------------------- | -------------------------------------------------- |
 | `DATABASE_URL` | Prisma CLI, database access | The CMS's own PostgreSQL. Never Lemonn production. |
 
-All variables are server-only. Validate new ones in `src/lib/env.ts` and add a placeholder to
+All variables are server-only. Validate new ones with Zod on the server and add a placeholder to
 `.env.example`.
 
 ## Database

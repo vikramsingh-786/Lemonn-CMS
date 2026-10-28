@@ -46,7 +46,7 @@ Run `pnpm check` and `pnpm build` before reporting work as done.
 
 - Import alias: `@/*` → `src/*`.
 - Server Components by default; add `"use client"` only when interactivity requires it.
-- Validate external input and env with Zod at server boundaries (`src/lib/env.ts`).
+- Validate external input and env with Zod at server boundaries.
 - Prisma client is generated to `src/generated/prisma` (gitignored; regenerated on install).
   Import from `@/generated/prisma/client`.
 - shadcn/ui components go in `src/components/ui`; use `cn()` from `@/lib/utils`.
