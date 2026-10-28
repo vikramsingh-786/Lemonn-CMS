@@ -192,8 +192,8 @@ function EmptyState({ filtered, hasRun }: { filtered: boolean; hasRun: boolean }
     ? ["No articles in this view", "Articles with this status will appear here."]
     : hasRun
       ? [
-          "No verified drafts",
-          "No story passed verification in the last run. See the run summary and the Verification list for reasons.",
+          "Drafting not started yet",
+          "This run discovered stories only. Verification and drafting come in later steps.",
         ]
       : [
           "No research results yet",

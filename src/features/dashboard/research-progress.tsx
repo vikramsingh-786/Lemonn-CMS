@@ -24,19 +24,32 @@ const ERROR_LABEL: Record<string, string> = {
   unavailable: "service errors",
   bad_response: "invalid responses",
   bad_request: "rejected requests",
+  blocked: "blocked fetches",
+  not_configured: "missing configuration",
+  budget: "call limits reached",
+};
+
+const PROVIDER_LABEL: Record<string, string> = {
+  gemini: "Gemini",
+  tavily: "Tavily",
+  sitemap: "sitemap",
 };
 
 /** Live, honest view of what the run has actually done so far. */
 export function ResearchProgress({ run }: { run: ResearchRun }) {
   const { counts } = run;
   const stats = [
-    ["Found", counts.resultsFound],
-    ["Unique stories", counts.uniqueCandidates],
-    ["Processed", counts.processed],
-    ["Verified", run.candidates.filter((c) => c.status === "verified").length],
-    ["Held", counts.held],
-    ["Drafts", `${run.drafts.length} / ${run.draftTarget}`],
+    ["In window", counts.resultsFound],
+    ["Off-topic", run.coverage.reduce((n, c) => n + c.offTopic, 0)],
+    ["Kept", run.items.length],
+    [
+      "Sources OK",
+      `${run.coverage.filter((c) => c.status === "ok").length} / ${run.coverage.length}`,
+    ],
+    ["Tavily calls", counts.searchesUsed],
+    ["Verify & draft", "Not started"],
   ] as const;
+  const topics = Object.entries(run.topicCounts);
   const errors = Object.entries(run.errorCounts);
 
   return (
@@ -63,13 +76,28 @@ export function ResearchProgress({ run }: { run: ResearchRun }) {
           </div>
         ))}
       </dl>
-      <p className="mt-3 text-xs text-muted-foreground tabular-nums">
-        {counts.duplicatesRemoved} duplicates removed · {counts.excludedStale} too old ·{" "}
-        {counts.excludedUndated} undated · {counts.notProcessed} not processed ·{" "}
-        {counts.searchesUsed} searches · {counts.aiCallsUsed} AI calls
-        {run.timings.length > 0 &&
-          ` · ${run.timings.map((t) => `${t.stage.replace(/_/g, " ")} ${(t.ms / 1000).toFixed(1)}s`).join(" · ")}`}
-      </p>
+      {run.timings.length > 0 && (
+        <p className="mt-3 text-xs text-muted-foreground tabular-nums">
+          {run.timings
+            .map((t) => `${t.stage.replace(/_/g, " ")} ${(t.ms / 1000).toFixed(1)}s`)
+            .join(" · ")}
+        </p>
+      )}
+
+      {topics.length > 0 && (
+        <>
+          <h3 className="mt-5 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Stories per topic
+          </h3>
+          <ul className="mt-2 flex flex-wrap gap-2 text-xs">
+            {topics.map(([topic, n]) => (
+              <li key={topic} className="rounded-full bg-muted px-3 py-1">
+                {topic} <span className="font-semibold tabular-nums">{n}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
 
       {run.coverage.length > 0 && (
         <>
@@ -82,11 +110,9 @@ export function ResearchProgress({ run }: { run: ResearchRun }) {
                 {COVERAGE_ICON[c.status]}
                 <span className="truncate">{c.name}</span>
                 <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-                  {c.status === "ok"
-                    ? `${c.eligibleCount}/${c.resultCount} in window`
-                    : c.status === "failed"
-                      ? (c.message ?? "search failed")
-                      : "no recent results"}
+                  {c.status === "failed"
+                    ? (c.message ?? "discovery failed")
+                    : `${c.method === "sitemap" ? "Sitemap" : "Tavily"} · ${c.kept} kept · ${c.offTopic} off-topic · ${c.inWindow} in window`}
                 </span>
               </li>
             ))}
@@ -101,7 +127,7 @@ export function ResearchProgress({ run }: { run: ResearchRun }) {
           {errors
             .map(([key, n]) => {
               const [provider, kind] = key.split(":");
-              return `${n} ${provider === "gemini" ? "Gemini" : "Tavily"} ${ERROR_LABEL[kind ?? ""] ?? kind}`;
+              return `${n} ${PROVIDER_LABEL[provider ?? ""] ?? provider} ${ERROR_LABEL[kind ?? ""] ?? kind}`;
             })
             .join(", ")}
         </p>
