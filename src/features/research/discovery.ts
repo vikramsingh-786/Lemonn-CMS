@@ -1,11 +1,15 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { sourceDomain, type NewsSource } from "@/features/dashboard/data";
+import { pool } from "@/lib/pool";
 import { FetchError, isWithinDomain } from "@/lib/safe-fetch";
-import { rankRun, type GeminiConfig } from "./rank";
+import type { ServerEnv } from "@/lib/env";
+import { rankRun } from "./rank";
+import { addRun, claimActive, getRun, releaseActive, saveRun } from "./run-store";
 import { NEWS_SITEMAPS, readNewsSitemaps, type RawItem } from "./sitemaps";
 import { searchTavily } from "./tavily";
 import { TOPICS, classifyTopics } from "./topics";
+import { verifyRun } from "./verify";
 import {
   DRAFT_TARGET,
   type DiscoveredItem,
@@ -17,18 +21,6 @@ import {
 const MAX_PER_SOURCE = 20;
 const CONCURRENCY = 3;
 const MAX_TAVILY_CALLS = 20;
-const MAX_RUNS = 10;
-
-// ponytail: in-memory run registry (last 10 runs, one active at a time), lost on restart.
-// A database + job queue replaces it. Kept on globalThis so dev hot reloads and separate route
-// bundles share one registry.
-const store = ((
-  globalThis as { __researchRuns?: { runs: Map<string, ResearchRun>; active: string | null } }
-).__researchRuns ??= { runs: new Map(), active: null });
-
-export function getRun(runId: string): ResearchRun | undefined {
-  return store.runs.get(runId);
-}
 
 /** True when the source has no sitemap, so a Tavily key is required up front. */
 export function needsTavily(source: NewsSource): boolean {
@@ -39,12 +31,13 @@ export function needsTavily(source: NewsSource): boolean {
 export function startRun(
   sources: readonly NewsSource[],
   window: ResearchRun["window"],
-  tavilyKey: string | undefined,
-  gemini: GeminiConfig,
+  env: ServerEnv,
 ): { runId: string; work: () => Promise<void> } | null {
-  if (store.active) return null;
+  const tavilyKey = env.TAVILY_API_KEY;
+  const runId = randomUUID();
+  if (!claimActive(runId)) return null;
   const run: ResearchRun = {
-    runId: randomUUID(),
+    runId,
     window,
     stage: "discovering",
     currentStep: "discover",
@@ -55,6 +48,7 @@ export function startRun(
     coverage: [],
     items: [],
     excluded: [],
+    draftQueue: [],
     topicCounts: Object.fromEntries(TOPICS.map((t) => [t.name, 0])),
     counts: {
       resultsFound: 0,
@@ -69,6 +63,9 @@ export function startRun(
       notProcessed: 0,
       searchesUsed: 0,
       aiCallsUsed: 0,
+      pagesAttempted: 0,
+      pagesFetched: 0,
+      pagesBlocked: 0,
     },
     candidates: [],
     drafts: [],
@@ -78,9 +75,7 @@ export function startRun(
     shortfallReasons: [],
     error: null,
   };
-  store.active = run.runId;
-  store.runs.set(run.runId, run);
-  for (const old of [...store.runs.keys()].slice(0, -MAX_RUNS)) store.runs.delete(old);
+  addRun(run);
 
   const work = async () => {
     const started = Date.now();
@@ -98,27 +93,65 @@ export function startRun(
         run.stageDetail = "Discovery failed for every source";
         return;
       }
-      await rankRun(run, gemini);
-      run.stage = "completed";
-      run.stageDetail = `Ranked ${run.candidates.length} candidate${run.candidates.length === 1 ? "" : "s"} from ${run.items.length} discovered stor${run.items.length === 1 ? "y" : "ies"}`;
+      void saveRun(run);
+      await rankRun(run, { apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL_FAST });
+      void saveRun(run);
+      await verifyRun(run, env);
+      completeRun(run);
     } catch {
       run.stage = "failed";
       run.error = { code: "internal_error", message: "Research failed unexpectedly." };
     } finally {
       run.currentStep = null;
       run.finishedAt = new Date().toISOString();
-      store.active = null;
+      releaseActive(run.runId);
+      await saveRun(run);
     }
   };
   return { runId: run.runId, work };
 }
 
-async function pool<T>(items: readonly T[], size: number, fn: (item: T) => Promise<void>) {
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) await fn(items[next++]!);
+function completeRun(run: ResearchRun) {
+  run.stage = "completed";
+  run.error = null;
+  run.stageDetail =
+    run.counts.processed > 0
+      ? `Verified ${run.counts.verified} of ${run.counts.processed} checked stories; ${run.draftQueue.length} queued for drafting`
+      : `Ranked ${run.candidates.length} candidate${run.candidates.length === 1 ? "" : "s"} from ${run.items.length} discovered stor${run.items.length === 1 ? "y" : "ies"}`;
+}
+
+export type RetryStart =
+  { ok: true; work: () => Promise<void> } | { ok: false; status: 404 | 409; message: string };
+
+/**
+ * Re-verifies only the failed / not-processed stories of an existing run (same Run ID).
+ * Discovery and ranking are not repeated; finished stories are left as they are.
+ */
+export async function startVerificationRetry(runId: string, env: ServerEnv): Promise<RetryStart> {
+  const run = await getRun(runId);
+  if (!run) return { ok: false, status: 404, message: "Research run not found." };
+  if (run.candidates.length === 0)
+    return { ok: false, status: 409, message: "This run has no ranked stories to verify." };
+  if (!claimActive(runId))
+    return { ok: false, status: 409, message: "A research run is already in progress." };
+  run.stage = "processing";
+  run.error = null;
+  run.finishedAt = null;
+  const work = async () => {
+    try {
+      await verifyRun(run, env, { retry: true });
+      completeRun(run);
+    } catch {
+      run.stage = "failed";
+      run.error = { code: "internal_error", message: "Verification retry failed unexpectedly." };
+    } finally {
+      run.currentStep = null;
+      run.finishedAt = new Date().toISOString();
+      releaseActive(runId);
+      await saveRun(run);
+    }
   };
-  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
+  return { ok: true, work };
 }
 
 function newestFirst(a: { publishedAt: string | null }, b: { publishedAt: string | null }) {
@@ -171,13 +204,16 @@ async function discoverSource(run: ResearchRun, source: NewsSource, tavilyKey: s
     const method: DiscoveryMethod = raw ? "sitemap" : "tavily";
     coverage.method = method;
     if (!raw) {
-      raw = await searchTavily(domain, tavilyKey, () => {
-        if (run.counts.searchesUsed >= MAX_TAVILY_CALLS)
-          throw new FetchError(
-            "budget",
-            `Tavily call limit for this run (${MAX_TAVILY_CALLS}) reached`,
-          );
-        run.counts.searchesUsed++;
+      raw = await searchTavily(domain, {
+        apiKey: tavilyKey,
+        spendCall: () => {
+          if (run.counts.searchesUsed >= MAX_TAVILY_CALLS)
+            throw new FetchError(
+              "budget",
+              `Tavily call limit for discovery (${MAX_TAVILY_CALLS}) reached`,
+            );
+          run.counts.searchesUsed++;
+        },
       });
     }
 

@@ -18,6 +18,7 @@ import { NewsSources } from "./news-sources";
 import { ResearchControls } from "./research-controls";
 import { ResearchFeed, ResearchPanel } from "./research-panel";
 import { ResearchProgress } from "./research-progress";
+import { VerificationReview } from "./verification-review";
 
 const POLL_INTERVAL_MS = 2_000;
 /** Client gives up polling after this long (the server stops starting new work at 8 min). */
@@ -42,7 +43,7 @@ async function readError(response: Response, fallback: string): Promise<string> 
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Research state lives on the server in memory; nothing is persisted, published or sent to lemonn.co.in. */
+/** Research runs are saved on the server (.data/runs, local only); nothing is published or sent to lemonn.co.in. */
 export function Dashboard() {
   const [sources, setSources] = useState<ConfiguredSource[]>(INITIAL_SOURCES);
   const [researchStatus, setResearchStatus] = useState<ResearchStatus>("idle");
@@ -64,6 +65,29 @@ export function Dashboard() {
         });
       })
       .catch(() => {});
+    // Revisit / refresh: reload the run named in the URL (results are saved on the server).
+    const runId = new URLSearchParams(window.location.search).get("run");
+    if (runId && /^[0-9a-f-]{36}$/.test(runId)) {
+      fetch(`/api/research/${runId}`)
+        .then(async (r) => {
+          if (!mounted.current) return;
+          if (!r.ok) {
+            window.history.replaceState(null, "", window.location.pathname);
+            return;
+          }
+          const snapshot = (await r.json()) as ResearchRun;
+          setRun(snapshot);
+          if (snapshot.stage === "completed") setResearchStatus("done");
+          else if (snapshot.stage === "failed") {
+            setError(snapshot.error?.message ?? "Research failed.");
+            setResearchStatus("error");
+          } else {
+            setResearchStatus("running");
+            await follow(runId).catch(fail);
+          }
+        })
+        .catch(() => {});
+    }
     return () => {
       mounted.current = false;
     };
@@ -91,6 +115,43 @@ export function Dashboard() {
     }
   }
 
+  /** Polls a run until it finishes; throws with a readable message on failure. */
+  async function follow(runId: string) {
+    const startedAt = Date.now();
+    let failures = 0;
+    while (mounted.current) {
+      await sleep(POLL_INTERVAL_MS);
+      if (Date.now() - startedAt > MAX_POLL_MS) {
+        throw new Error("Research is taking too long. Check again later.");
+      }
+      const response = await fetch(`/api/research/${runId}`).catch(() => null);
+      if (!response?.ok) {
+        if (response?.status === 404)
+          throw new Error(await readError(response, "The run was lost."));
+        if (++failures >= MAX_POLL_FAILURES) {
+          throw new Error("Lost contact with the server while researching.");
+        }
+        continue;
+      }
+      failures = 0;
+      const snapshot = (await response.json()) as ResearchRun;
+      if (!mounted.current) return;
+      setRun(snapshot);
+      if (snapshot.stage === "failed")
+        throw new Error(snapshot.error?.message ?? "Research failed.");
+      if (snapshot.stage === "completed") {
+        setResearchStatus("done");
+        return;
+      }
+    }
+  }
+
+  function fail(e: unknown) {
+    if (!mounted.current) return;
+    setError(e instanceof Error && e.message ? e.message : "Research failed. Please try again.");
+    setResearchStatus("error");
+  }
+
   async function runResearch() {
     if (running) return;
     setResearchStatus("running");
@@ -104,39 +165,25 @@ export function Dashboard() {
       });
       if (!start.ok) throw new Error(await readError(start, `Research failed (${start.status}).`));
       const { runId } = (await start.json()) as StartRunResponse;
-
-      // Poll for progress until the run finishes.
-      const startedAt = Date.now();
-      let failures = 0;
-      while (mounted.current) {
-        await sleep(POLL_INTERVAL_MS);
-        if (Date.now() - startedAt > MAX_POLL_MS) {
-          throw new Error("Research is taking too long. Check again later.");
-        }
-        const response = await fetch(`/api/research/${runId}`).catch(() => null);
-        if (!response?.ok) {
-          if (response?.status === 404)
-            throw new Error(await readError(response, "The run was lost."));
-          if (++failures >= MAX_POLL_FAILURES) {
-            throw new Error("Lost contact with the server while researching.");
-          }
-          continue;
-        }
-        failures = 0;
-        const snapshot = (await response.json()) as ResearchRun;
-        if (!mounted.current) return;
-        setRun(snapshot);
-        if (snapshot.stage === "failed")
-          throw new Error(snapshot.error?.message ?? "Research failed.");
-        if (snapshot.stage === "completed") {
-          setResearchStatus("done");
-          return;
-        }
-      }
+      // Keep the Run ID in the URL so a refresh or revisit shows this run again.
+      window.history.replaceState(null, "", `?run=${runId}`);
+      await follow(runId);
     } catch (e) {
-      if (!mounted.current) return;
-      setError(e instanceof Error && e.message ? e.message : "Research failed. Please try again.");
-      setResearchStatus("error");
+      fail(e);
+    }
+  }
+
+  /** Re-verifies only failed / not-processed stories of the current run (same Run ID). */
+  async function retryVerification() {
+    if (running || !run) return;
+    setResearchStatus("running");
+    setError(null);
+    try {
+      const start = await fetch(`/api/research/${run.runId}/verify`, { method: "POST" });
+      if (!start.ok) throw new Error(await readError(start, `Retry failed (${start.status}).`));
+      await follow(run.runId);
+    } catch (e) {
+      fail(e);
     }
   }
 
@@ -201,6 +248,7 @@ export function Dashboard() {
             disabled={running}
           />
           {run && <DiscoveredStories run={run} />}
+          {run && <VerificationReview run={run} onRetry={retryVerification} retrying={running} />}
           <ArticleReview
             drafts={drafts}
             hasRun={researchStatus === "done"}

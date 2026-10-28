@@ -207,7 +207,13 @@ export function scoreClusters(
         statusReason: "Queued for claim verification (Step 5, not built yet).",
         primaryEvidenceFound: false,
         claims: [],
-        claimCounts: { supported: 0, partially_supported: 0, contradicted: 0, unresolved: 0 },
+        claimCounts: {
+          verified: 0,
+          partially_verified: 0,
+          conflicting_evidence: 0,
+          unverified: 0,
+          verification_failed: 0,
+        },
         evidence: [],
         evidenceSearchFailures: 0,
         draftId: null,
@@ -215,6 +221,11 @@ export function scoreClusters(
         rankReasons: reasons,
         topics: clusterTopics(cluster),
         screenedBy: "rules",
+        entities: [],
+        officialSources: [],
+        independentSources: 0,
+        verificationScore: null,
+        verificationScoreReasons: [],
       },
     };
   });
@@ -265,15 +276,17 @@ export async function rankRun(run: ResearchRun, gemini: GeminiConfig): Promise<v
             snippet,
             topics: candidate.topics,
           })),
-          gemini.apiKey,
-          gemini.model,
-          () => {
-            if (run.counts.aiCallsUsed >= MAX_GEMINI_CALLS)
-              throw new FetchError(
-                "budget",
-                `Gemini call limit for this run (${MAX_GEMINI_CALLS}) reached`,
-              );
-            run.counts.aiCallsUsed++;
+          {
+            apiKey: gemini.apiKey,
+            model: gemini.model,
+            spendCall: () => {
+              if (run.counts.aiCallsUsed >= MAX_GEMINI_CALLS)
+                throw new FetchError(
+                  "budget",
+                  `Gemini call limit for screening (${MAX_GEMINI_CALLS}) reached`,
+                );
+              run.counts.aiCallsUsed++;
+            },
           },
         );
         const ids = new Set(batch.map((b) => b.candidate.id));
@@ -314,6 +327,7 @@ export async function rankRun(run: ResearchRun, gemini: GeminiConfig): Promise<v
       if (v.verifiable) c.rankReasons.push(`Gemini verifiable +${g.verifiable}`);
       c.rankReasons.push(`Gemini: ${v.reason}`);
       c.screenedBy = "rules+gemini";
+      c.verifiable = v.verifiable;
       return true;
     });
   }

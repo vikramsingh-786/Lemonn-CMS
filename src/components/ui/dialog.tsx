@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type DialogProps = {
   open: boolean;
@@ -10,10 +11,12 @@ type DialogProps = {
   children: React.ReactNode;
   /** Replaces the default "Got it" button (e.g. form actions). */
   actions?: React.ReactNode;
+  /** Extra classes for the dialog box (e.g. a wider max-width). */
+  className?: string;
 };
 
 /** Modal built on native <dialog>: focus trapping, Esc to close and inert background come free. */
-export function Dialog({ open, onClose, title, children, actions }: DialogProps) {
+export function Dialog({ open, onClose, title, children, actions, className }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
 
@@ -31,7 +34,10 @@ export function Dialog({ open, onClose, title, children, actions }: DialogProps)
       onClose={onClose}
       // Close when the backdrop (the dialog element itself) is clicked.
       onClick={(e) => e.target === e.currentTarget && onClose()}
-      className="m-auto w-[calc(100%-2rem)] max-w-md rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl backdrop:bg-black/40"
+      className={cn(
+        "m-auto w-[calc(100%-2rem)] max-w-md rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-xl backdrop:bg-black/40",
+        className,
+      )}
     >
       <div className="p-6">
         <h2 id={titleId} className="text-base font-semibold">

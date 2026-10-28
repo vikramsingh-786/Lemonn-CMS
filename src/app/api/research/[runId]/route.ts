@@ -1,12 +1,12 @@
 import { connection } from "next/server";
-import { getRun } from "@/features/research/discovery";
+import { getRun } from "@/features/research/run-store";
 import type { ApiErrorBody } from "@/features/research/types";
 
-/** Snapshot of a research run, polled by the dashboard. */
+/** Snapshot of a research run (memory, else .data/runs), polled by the dashboard. */
 export async function GET(_request: Request, ctx: RouteContext<"/api/research/[runId]">) {
   await connection();
   const { runId } = await ctx.params;
-  const run = getRun(runId);
+  const run = await getRun(runId);
   if (!run) {
     const body: ApiErrorBody = {
       error: { code: "not_found", message: "Research run not found.", retryable: false },

@@ -6,8 +6,8 @@ import type { RawItem } from "./sitemaps";
 const ENDPOINT = "https://api.tavily.com/search";
 const TIMEOUT_MS = 15_000;
 const MAX_RETRIES = 2;
-const MAX_RETRY_WAIT_MS = 10_000;
-const QUERY =
+const MAX_RETRY_WAIT_MS = 30_000;
+const NEWS_QUERY =
   "Indian stock market, company results, IPO, SEBI RBI, F&O, mutual funds, economy news";
 
 const responseSchema = z.object({
@@ -20,6 +20,9 @@ const responseSchema = z.object({
     }),
   ),
 });
+
+/** Key plus a callback run before every HTTP attempt; it throws when the run's budget is spent. */
+export type TavilyAccess = { apiKey: string | undefined; spendCall: () => void };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -38,33 +41,22 @@ function toIso(value: string | null | undefined): string | null {
   return Number.isNaN(ms) ? null : new Date(ms).toISOString();
 }
 
-/**
- * One news search restricted to `domain` (last day, basic depth, up to 20 results).
- * `spendCall` is called before every HTTP attempt and throws when the run's budget is spent.
- */
-export async function searchTavily(
-  domain: string,
-  apiKey: string | undefined,
-  spendCall: () => void,
+/** One Tavily search with timeout and ≤2 retries on 429/timeouts/5xx (Retry-After honoured). */
+async function tavilySearch(
+  body: Record<string, unknown>,
+  access: TavilyAccess,
 ): Promise<RawItem[]> {
-  if (!apiKey) throw new FetchError("not_configured", "TAVILY_API_KEY is not set");
+  if (!access.apiKey) throw new FetchError("not_configured", "TAVILY_API_KEY is not set");
   for (let attempt = 0; ; attempt++) {
-    spendCall();
+    access.spendCall();
     let res: Response;
     try {
       res = await fetch(ENDPOINT, {
         method: "POST",
         signal: AbortSignal.timeout(TIMEOUT_MS),
         cache: "no-store",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: QUERY,
-          topic: "news",
-          time_range: "day",
-          search_depth: "basic",
-          max_results: 20,
-          include_domains: [domain],
-        }),
+        headers: { Authorization: `Bearer ${access.apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
     } catch (e) {
       const timedOut = e instanceof DOMException && e.name === "TimeoutError";
@@ -96,4 +88,53 @@ export async function searchTavily(
     const retryAfter = Number(res.headers.get("retry-after")) * 1000;
     await sleep(Math.min(retryAfter > 0 ? retryAfter : 1000 * 2 ** attempt, MAX_RETRY_WAIT_MS));
   }
+}
+
+/** Discovery: one news search restricted to `domain` (last day, basic depth, up to 20 results). */
+export function searchTavily(domain: string, access: TavilyAccess): Promise<RawItem[]> {
+  return tavilySearch(
+    {
+      query: NEWS_QUERY,
+      topic: "news",
+      time_range: "day",
+      search_depth: "basic",
+      max_results: 20,
+      include_domains: [domain],
+    },
+    access,
+  );
+}
+
+/** Verification: general search restricted to official `domains`, no time limit. */
+export function searchOfficial(
+  {
+    query,
+    domains,
+    maxResults = 5,
+  }: { query: string; domains: readonly string[]; maxResults?: number },
+  access: TavilyAccess,
+): Promise<RawItem[]> {
+  return tavilySearch(
+    {
+      query: query.slice(0, 300),
+      topic: "general",
+      search_depth: "basic",
+      max_results: maxResults,
+      include_domains: domains,
+    },
+    access,
+  );
+}
+
+/** Open web search, used only to find an organisation's official website. */
+export function searchWeb(query: string, access: TavilyAccess, maxResults = 5): Promise<RawItem[]> {
+  return tavilySearch(
+    {
+      query: query.slice(0, 300),
+      topic: "general",
+      search_depth: "basic",
+      max_results: maxResults,
+    },
+    access,
+  );
 }
