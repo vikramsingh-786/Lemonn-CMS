@@ -15,62 +15,36 @@ import type { PipelineStep, ResearchRun } from "@/features/research/types";
 import { MAX_SOURCES } from "@/features/sources/validation";
 import { cn } from "@/lib/utils";
 import type { ResearchStatus } from "./data";
-import { CandidateStatusBadge } from "./status";
 
 type StepState = "idle" | "active" | "done";
 
 const STEPS = [
-  { key: "discover", label: "Discover", detail: "Tavily news search, last 24h", icon: Search },
+  { key: "discover", label: "Discover", detail: "News sitemaps + Tavily, last 24h", icon: Search },
   { key: "evidence", label: "Evidence", detail: "Official + independent sources", icon: FileText },
   { key: "verify", label: "Verify", detail: "Gemini claims + rules gate", icon: ShieldCheck },
   { key: "draft", label: "Draft", detail: "Verified stories only", icon: Sparkles },
 ] as const satisfies readonly { key: PipelineStep; [k: string]: unknown }[];
 
-/**
- * Step states from the server's real current step (no invented progress). Stories are
- * processed one after another, so Evidence → Verify → Draft repeats per story.
- */
-export function stepStates(status: ResearchStatus, run: ResearchRun | null): StepState[] {
-  if (status === "done") return ["done", "done", "done", "done"];
-  if (status !== "running") return ["idle", "idle", "idle", "idle"];
-  const current = STEPS.findIndex((step) => step.key === (run?.currentStep ?? "discover"));
-  return STEPS.map((_, i) => (i < current ? "done" : i === current ? "active" : "idle"));
+/** Step states from the server's real progress. Only Discover is built so far. */
+export function stepStates(status: ResearchStatus): StepState[] {
+  if (status === "done") return ["done", "idle", "idle", "idle"];
+  if (status === "running") return ["active", "idle", "idle", "idle"];
+  return ["idle", "idle", "idle", "idle"];
 }
 
-/** Live counts under each step once there is data; otherwise the static description. */
+/** Live counts under Discover once there is data; later steps aren't built yet. */
 function stepDetail(key: PipelineStep, fallback: string, run: ResearchRun | null): string {
-  if (!run || (key !== "discover" && run.stage !== "processing" && run.stage !== "completed")) {
-    return fallback;
-  }
-  const verified = run.candidates.filter((c) => c.status === "verified").length;
-  const held = run.candidates.filter((c) =>
-    [
-      "partially_verified",
-      "unverified",
-      "contradicted",
-      "verification_failed",
-      "irrelevant",
-    ].includes(c.status),
-  ).length;
-  switch (key) {
-    case "discover":
-      return run.stage === "discovering" || run.stage === "expanding"
-        ? run.stageDetail
-        : `${run.counts.resultsFound} results · ${run.counts.uniqueCandidates} unique stories`;
-    case "evidence":
-      return `${run.counts.processed} of ${run.candidates.filter((c) => c.status !== "not_processed").length} stories checked`;
-    case "verify":
-      return `${verified} verified · ${held} held`;
-    case "draft":
-      return `${run.drafts.length} of ${run.draftTarget} drafts`;
-  }
+  if (!run) return fallback;
+  if (key !== "discover") return "Not started yet";
+  return run.stage === "discovering"
+    ? run.stageDetail
+    : `${run.counts.resultsFound} in window · ${run.items.length} on topic`;
 }
 
 type ResearchPanelProps = {
   status: ResearchStatus;
   run: ResearchRun | null;
   error: string | null;
-  notice?: string | null;
   enabledSources: number;
   totalSources: number;
   onResearch: () => void;
@@ -81,12 +55,11 @@ export function ResearchPanel({
   status,
   run,
   error,
-  notice,
   enabledSources,
   totalSources,
   onResearch,
 }: ResearchPanelProps) {
-  const states = stepStates(status, run);
+  const states = stepStates(status);
   const running = status === "running";
 
   return (
@@ -156,12 +129,6 @@ export function ResearchPanel({
       </ol>
 
       <div role="status" aria-live="polite">
-        {notice && (
-          <p className="mt-5 flex items-start gap-2.5 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
-            <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />
-            <span>{notice}</span>
-          </p>
-        )}
         {running && (
           <p className="mt-5 flex items-start gap-2.5 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
             <LoaderCircle aria-hidden className="mt-0.5 size-4 shrink-0 animate-spin" />
@@ -174,10 +141,8 @@ export function ResearchPanel({
           <p className="mt-5 flex items-start gap-2.5 rounded-2xl bg-success-soft px-4 py-3 text-sm text-success">
             <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
             <span>
-              Research completed: {run.drafts.length} verified draft
-              {run.drafts.length === 1 ? "" : "s"} (target {run.draftTarget}) from{" "}
-              {run.counts.uniqueCandidates} unique{" "}
-              {run.counts.uniqueCandidates === 1 ? "story" : "stories"}.
+              Discovery completed: {run.items.length} {run.items.length === 1 ? "story" : "stories"}{" "}
+              on the 8 topics. Verification and drafting are not started yet.
             </span>
           </p>
         )}
@@ -209,7 +174,7 @@ export function ResearchPanel({
 
 /** Compact feed of the latest stories, like a trade feed; links into the full lists. */
 export function ResearchFeed({ run }: { run: ResearchRun | null }) {
-  const items = (run?.candidates ?? []).slice(0, 5);
+  const items = (run?.items ?? []).slice(0, 5);
   return (
     <section
       aria-labelledby="feed-heading"
@@ -227,16 +192,16 @@ export function ResearchFeed({ run }: { run: ResearchRun | null }) {
         </p>
       ) : (
         <ul className="mt-4 flex flex-col gap-2">
-          {items.map((c) => (
-            <li key={c.id}>
+          {items.map((item) => (
+            <li key={item.url}>
               <a
-                href={c.draftId ? "#articles" : "#verification"}
+                href="#discovered"
                 className="pill-raised flex items-center gap-3 rounded-full bg-muted py-2 pr-2 pl-4 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{c.headline}</span>
-                  <span className="mt-0.5 block text-xs">
-                    <CandidateStatusBadge status={c.status} />
+                  <span className="block truncate text-sm font-medium">{item.title}</span>
+                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                    {item.publisher} · {item.topics.join(", ")}
                   </span>
                 </span>
                 <span className="sr-only">, view details</span>

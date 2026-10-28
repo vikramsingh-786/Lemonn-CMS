@@ -92,13 +92,35 @@ export type ResearchDraft = {
   researchedAt: string;
 };
 
+export type DiscoveryMethod = "sitemap" | "tavily";
+
+/** A story found in Step 3 (discovery). Title and snippet are untrusted text: render as plain text. */
+export type DiscoveredItem = {
+  url: string;
+  title: string;
+  /** Sitemap keywords or Tavily excerpt; may be empty. */
+  snippet: string;
+  /** UTC ISO; null when the provider gave no parseable date (never estimated). */
+  publishedAt: string | null;
+  sourceId: string;
+  publisher: string;
+  method: DiscoveryMethod;
+  topics: string[];
+};
+
 export type SourceCoverage = {
   sourceId: string;
   name: string;
   domain: string;
   status: "ok" | "no_results" | "failed";
-  resultCount: number;
-  eligibleCount: number;
+  /** Method that produced the results (Tavily when a sitemap failed); null before it ran. */
+  method: DiscoveryMethod | null;
+  /** Items inside the 24h window (undated Tavily results included). */
+  inWindow: number;
+  /** Items dropped because no topic matched. */
+  offTopic: number;
+  /** Items kept (max per source applies). */
+  kept: number;
   message?: string;
 };
 
@@ -129,6 +151,10 @@ export type ResearchRun = {
   finishedAt: string | null;
   draftTarget: number;
   coverage: SourceCoverage[];
+  /** Discovered stories on the 8 topics, newest first. */
+  items: DiscoveredItem[];
+  /** Kept items per topic name (an item can count under several topics). */
+  topicCounts: Record<string, number>;
   counts: RunCounts;
   candidates: CandidateReport[];
   drafts: ResearchDraft[];
@@ -163,13 +189,6 @@ export type ApiErrorBody = {
 };
 
 export type StartRunResponse = { runId: string };
-
-/** Step-1 response: the request is valid; nothing has been researched yet. */
-export type ResearchRequestAccepted = {
-  accepted: true;
-  window: { start: string; end: string };
-  sources: { id: string; name: string; domain: string }[];
-};
 
 /** Source as exposed by /api/sources. */
 export type ConfiguredSource = {

@@ -7,8 +7,13 @@ admin review them, and publish approved articles to the Lemonn public website.
 
 ## Current state
 
-Only the project foundation exists: a minimal Next.js app with the tooling configured.
-Everything under "Planned" below is not implemented.
+The dashboard UI and research Step 3 (discovery) exist. `POST /api/research` starts a background
+run in server memory and `GET /api/research/[runId]` returns its progress. Discovery reads
+publishers' Google News sitemaps (config in `src/features/research/sitemaps.ts`) or, for sources
+without one, searches Tavily. It keeps stories from the last 24 hours on 8 topics
+(`src/features/research/topics.ts`), at most 20 per source. Publisher fetches go through
+`src/lib/safe-fetch.ts`. There is still no database, queue, worker, auth, verification or drafting.
+Runs are lost on restart.
 
 ## System boundaries
 

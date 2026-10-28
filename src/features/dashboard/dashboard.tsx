@@ -6,7 +6,6 @@ import { Dialog } from "@/components/ui/dialog";
 import type {
   ApiErrorBody,
   ConfiguredSource,
-  ResearchRequestAccepted,
   ResearchRun,
   StartRunResponse,
 } from "@/features/research/types";
@@ -14,8 +13,8 @@ import { AddSourceDialog } from "./add-source-dialog";
 import { ArticleReview } from "./article-review";
 import { CandidateReview } from "./candidate-review";
 import { DashboardSummary } from "./dashboard-summary";
-import { formatIst } from "./format";
 import { DEFAULT_SOURCES, type ResearchStatus, sourceDomain } from "./data";
+import { DiscoveredStories } from "./discovered-stories";
 import { NewsSources } from "./news-sources";
 import { ResearchControls } from "./research-controls";
 import { ResearchFeed, ResearchPanel } from "./research-panel";
@@ -50,8 +49,6 @@ export function Dashboard() {
   const [researchStatus, setResearchStatus] = useState<ResearchStatus>("idle");
   const [run, setRun] = useState<ResearchRun | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** Shown when the server accepted the request but research steps aren't connected yet. */
-  const [notice, setNotice] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const mounted = useRef(false);
 
@@ -99,7 +96,6 @@ export function Dashboard() {
     if (running) return;
     setResearchStatus("running");
     setError(null);
-    setNotice(null);
     setRun(null);
     try {
       const start = await fetch("/api/research", {
@@ -108,19 +104,7 @@ export function Dashboard() {
         body: JSON.stringify({ sources: sources.map(({ id, enabled }) => ({ id, enabled })) }),
       });
       if (!start.ok) throw new Error(await readError(start, `Research failed (${start.status}).`));
-      const started = (await start.json()) as StartRunResponse | ResearchRequestAccepted;
-      if (!("runId" in started)) {
-        // Step-1 API: request validated, research pipeline not connected yet.
-        const names = started.sources.map((s) => s.name).join(", ");
-        setNotice(
-          `Request received: ${started.sources.length} source${started.sources.length === 1 ? "" : "s"} (${names}), ` +
-            `window ${formatIst(started.window.start)} – ${formatIst(started.window.end)}. ` +
-            "Research steps are not connected yet.",
-        );
-        setResearchStatus("idle");
-        return;
-      }
-      const { runId } = started;
+      const { runId } = (await start.json()) as StartRunResponse;
 
       // Poll for progress until the run finishes.
       const startedAt = Date.now();
@@ -201,7 +185,6 @@ export function Dashboard() {
             status={researchStatus}
             run={run}
             error={error}
-            notice={notice}
             enabledSources={enabledSources}
             totalSources={sources.length}
             onResearch={runResearch}
@@ -218,6 +201,7 @@ export function Dashboard() {
             onRemove={removeSource}
             disabled={running}
           />
+          {run && <DiscoveredStories items={run.items} />}
           {run && <CandidateReview candidates={run.candidates} />}
           <ArticleReview
             drafts={drafts}

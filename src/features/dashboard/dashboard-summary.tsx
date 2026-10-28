@@ -26,7 +26,7 @@ const RESEARCH_ICON = {
 
 const RESEARCH_DETAIL: Record<ResearchStatus, string> = {
   idle: "Searches the last 24 hours",
-  running: "Discovering, verifying and drafting",
+  running: "Discovering news (last 24h)",
   done: "Results are not saved",
   error: "See the message above",
 };
