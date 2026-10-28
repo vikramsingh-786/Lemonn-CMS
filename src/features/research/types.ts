@@ -164,6 +164,13 @@ export type ApiErrorBody = {
 
 export type StartRunResponse = { runId: string };
 
+/** Step-1 response: the request is valid; nothing has been researched yet. */
+export type ResearchRequestAccepted = {
+  accepted: true;
+  window: { start: string; end: string };
+  sources: { id: string; name: string; domain: string }[];
+};
+
 /** Source as exposed by /api/sources. */
 export type ConfiguredSource = {
   id: string;
