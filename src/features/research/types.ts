@@ -6,7 +6,7 @@
 export const DRAFT_TARGET = 10;
 
 export type RunStage =
-  "discovering" | "expanding" | "ranking" | "processing" | "completed" | "failed";
+  "discovering" | "expanding" | "ranking" | "processing" | "drafting" | "completed" | "failed";
 
 /** The pipeline step the server most recently started (for live step display). */
 export type PipelineStep = "discover" | "rank" | "evidence" | "verify" | "draft";
@@ -151,6 +151,8 @@ export type DraftQueueItem = {
   verificationScore: number;
   readiness: DraftReadiness;
   reason: string;
+  /** Why drafting this story failed or was skipped (absent when drafted or not tried yet). */
+  draftError?: string;
 };
 
 export type ExclusionReason =
@@ -181,11 +183,27 @@ export type ResearchDraft = {
   sourcePublishedAt: string | null;
   officialEvidenceUrls: string[];
   secondaryEvidenceUrls: string[];
-  verificationStatus: "verified";
+  verificationStatus: "verified" | "partially_verified";
+  /** One of the 8 discovery topics. */
+  category: string;
+  tags: string[];
+  /** Each verified claim the draft relies on → its official evidence URLs (from our records only). */
   claimEvidence: { claim: string; evidenceUrls: string[] }[];
+  /** Material claims not verified (and gaps of verified ones): must not appear as fact. */
+  missingEvidenceWarnings: string[];
+  /** Deterministic checks run by application code; readiness depends on them. */
+  checks: DraftCheck[];
   readiness: DraftReadiness;
   readinessReason: string;
+  model: string;
+  createdAt: string;
   researchedAt: string;
+};
+
+export type DraftCheck = {
+  check: "figures" | "claim_ids" | "no_copying" | "no_advice" | "lengths";
+  passed: boolean;
+  note: string;
 };
 
 export type DiscoveryMethod = "sitemap" | "tavily";

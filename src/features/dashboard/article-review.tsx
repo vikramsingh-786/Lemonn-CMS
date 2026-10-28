@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { FileText, Send, ShieldCheck, TriangleAlert } from "lucide-react";
+import { CircleCheck, CircleX, FileText, RotateCw, Send, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { ResearchDraft } from "@/features/research/types";
+import { Dialog } from "@/components/ui/dialog";
+import type { DraftCheck, ResearchDraft } from "@/features/research/types";
 import { cn } from "@/lib/utils";
 import { formatIst } from "./format";
 import { SourceLink } from "./status";
@@ -18,18 +19,40 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: "published", label: "Published" },
 ];
 
+const CHECK_LABEL: Record<DraftCheck["check"], string> = {
+  figures: "Figures from verified claims only",
+  claim_ids: "Claim ids valid",
+  no_copying: "No copied sentences",
+  no_advice: "No investment advice",
+  lengths: "Field lengths",
+};
+
 type ArticleReviewProps = {
   drafts: readonly ResearchDraft[];
   /** True once a research run has finished (even with zero drafts). */
   hasRun: boolean;
   onPublish: (draft: ResearchDraft) => void;
+  /** Queued stories without a draft (failed or not tried) and why. */
+  pending: readonly { headline: string; reason: string }[];
+  onRetryDrafts: () => void;
+  busy: boolean;
 };
 
-export function ArticleReview({ drafts, hasRun, onPublish }: ArticleReviewProps) {
+/** Step 6 output: AI drafts from verified claims. Generated text is untrusted: plain text only. */
+export function ArticleReview({
+  drafts,
+  hasRun,
+  onPublish,
+  pending,
+  onRetryDrafts,
+  busy,
+}: ArticleReviewProps) {
   const [filter, setFilter] = useState<Filter>("all");
-  // AI drafts always start as drafts; only a human editor could make one "ready" (not built yet).
+  const [openId, setOpenId] = useState<string | null>(null);
+  // AI drafts always start as drafts; only a human editor could make one "ready" (Step 8).
   const countFor = (value: Filter) => (value === "all" || value === "draft" ? drafts.length : 0);
   const visible = countFor(filter) > 0 ? drafts : [];
+  const open = drafts.find((d) => d.id === openId) ?? null;
 
   return (
     <section
@@ -38,13 +61,23 @@ export function ArticleReview({ drafts, hasRun, onPublish }: ArticleReviewProps)
       className="scroll-mt-28 surface-raised rounded-lg border border-border bg-card"
     >
       <div className="border-b border-border px-5 py-4 sm:px-6 sm:py-5">
-        <h2 id="articles-heading" className="font-display text-lg font-semibold tracking-tight">
-          Research Results &amp; Articles
-        </h2>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          Drafts are written only for stories that passed verification, and still need human review.
-          Results are kept in server memory and disappear on restart.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 id="articles-heading" className="font-display text-lg font-semibold tracking-tight">
+              Research Results &amp; Articles
+            </h2>
+            <p className="mt-1.5 max-w-prose text-sm text-muted-foreground">
+              AI drafts written only from verified claims and their official sources, then checked
+              by rules. Every draft needs human review; nothing is published.
+            </p>
+          </div>
+          {pending.length > 0 && hasRun && (
+            <Button variant="outline" size="sm" onClick={onRetryDrafts} disabled={busy}>
+              <RotateCw aria-hidden />
+              Draft {pending.length} remaining
+            </Button>
+          )}
+        </div>
         <div role="group" aria-label="Filter articles" className="mt-5 flex flex-wrap gap-2">
           {FILTERS.map((f) => (
             <button
@@ -64,126 +97,209 @@ export function ArticleReview({ drafts, hasRun, onPublish }: ArticleReviewProps)
             </button>
           ))}
         </div>
+        {pending.length > 0 && (
+          <ul className="mt-4 space-y-1 rounded-2xl bg-muted px-4 py-3 text-xs text-muted-foreground">
+            {pending.map((p) => (
+              <li key={p.headline} className="flex gap-1.5">
+                <TriangleAlert aria-hidden className="mt-0.5 size-3 shrink-0 text-warning" />
+                <span>
+                  <span className="font-medium text-foreground">{p.headline}</span> · {p.reason}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {visible.length === 0 ? (
         <EmptyState filtered={filter !== "all"} hasRun={hasRun} />
       ) : (
-        <ul className="divide-y divide-border">
+        <ul className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
           {visible.map((draft) => (
-            <DraftCard key={draft.id} draft={draft} onPublish={onPublish} />
+            <DraftCard key={draft.id} draft={draft} onOpen={() => setOpenId(draft.id)} />
           ))}
         </ul>
       )}
+
+      <Dialog
+        open={open !== null}
+        onClose={() => setOpenId(null)}
+        title={open ? open.headline : ""}
+        className="max-h-[85vh] max-w-3xl overflow-y-auto"
+        actions={
+          open ? (
+            <>
+              <Button variant="outline" onClick={() => setOpenId(null)}>
+                Close
+              </Button>
+              <Button
+                onClick={() => {
+                  setOpenId(null);
+                  onPublish(open);
+                }}
+              >
+                <Send aria-hidden />
+                Publish
+              </Button>
+            </>
+          ) : undefined
+        }
+      >
+        {open && <DraftDetails draft={open} />}
+      </Dialog>
     </section>
   );
 }
 
-function DraftCard({
-  draft,
-  onPublish,
-}: {
-  draft: ResearchDraft;
-  onPublish: (d: ResearchDraft) => void;
-}) {
-  const ready = draft.readiness === "ready_for_review";
+function ReadinessBadge({ draft }: { draft: ResearchDraft }) {
+  return draft.readiness === "ready_for_review" ? (
+    <Badge variant="success">Ready for review</Badge>
+  ) : (
+    <Badge variant="warning">
+      <TriangleAlert aria-hidden />
+      Needs recheck
+    </Badge>
+  );
+}
+
+function DraftCard({ draft, onOpen }: { draft: ResearchDraft; onOpen: () => void }) {
   return (
-    <li className="px-5 py-4 sm:px-6 sm:py-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">AI draft</Badge>
-            <Badge variant="success">
-              <ShieldCheck aria-hidden />
-              Verified
-            </Badge>
-            {ready ? (
-              <Badge variant="neutral">Awaiting editorial review</Badge>
-            ) : (
-              <Badge variant="warning">
-                <TriangleAlert aria-hidden />
-                Needs evidence recheck
-              </Badge>
-            )}
-          </div>
-          <h3 className="mt-2 text-base font-semibold">{draft.headline}</h3>
-          <p className="mt-1 max-w-prose text-sm text-muted-foreground">{draft.summary}</p>
-        </div>
-        <Button size="sm" className="self-start" onClick={() => onPublish(draft)}>
-          <Send aria-hidden />
-          Publish
+    <li className="flex min-w-0 flex-col gap-2.5 rounded-2xl border border-border bg-background/40 p-4 text-sm">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <Badge variant="outline">AI draft</Badge>
+        <ReadinessBadge draft={draft} />
+        <Badge variant="neutral">
+          {draft.verificationStatus === "verified" ? "Verified" : "Partially verified"}
+        </Badge>
+        <Badge variant="outline">{draft.category}</Badge>
+      </div>
+      <h3 className="line-clamp-3 leading-snug font-semibold">{draft.headline}</h3>
+      <p className="line-clamp-3 text-xs text-muted-foreground">{draft.summary}</p>
+      <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3 text-xs">
+        <span className="text-muted-foreground">
+          {draft.publisher} · {formatIst(draft.sourcePublishedAt)}
+        </span>
+        <Button variant="outline" size="sm" onClick={onOpen}>
+          View details
         </Button>
       </div>
+    </li>
+  );
+}
 
-      <dl className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
-        <div className="flex gap-1">
-          <dt>Source date:</dt>
-          <dd>{formatIst(draft.sourcePublishedAt)}</dd>
-        </div>
-        <div className="flex gap-1">
-          <dt>Researched:</dt>
-          <dd>{formatIst(draft.researchedAt)}</dd>
-        </div>
-      </dl>
-
-      <ul className="mt-3 flex flex-col gap-1 text-xs">
-        <li className="flex min-w-0 items-baseline gap-2">
-          <span className="shrink-0 font-medium">Original · {draft.publisher}</span>
-          <SourceLink href={draft.originalUrl}>{draft.originalUrl}</SourceLink>
-        </li>
-        {draft.officialEvidenceUrls.map((url) => (
-          <li key={url} className="flex min-w-0 items-baseline gap-2">
-            <span className="shrink-0 font-medium text-success">Official</span>
-            <SourceLink href={url}>{url}</SourceLink>
-          </li>
-        ))}
-        {draft.secondaryEvidenceUrls.map((url) => (
-          <li key={url} className="flex min-w-0 items-baseline gap-2">
-            <span className="shrink-0 text-muted-foreground">Corroboration</span>
-            <SourceLink href={url}>{url}</SourceLink>
-          </li>
-        ))}
-      </ul>
-
+function DraftDetails({ draft }: { draft: ResearchDraft }) {
+  const official = new Set(draft.officialEvidenceUrls);
+  return (
+    <div className="space-y-5 text-xs text-foreground">
+      <div className="flex flex-wrap items-center gap-2">
+        <ReadinessBadge draft={draft} />
+        <Badge variant="neutral">
+          {draft.verificationStatus === "verified" ? "Verified" : "Partially verified"}
+        </Badge>
+        <span className="text-muted-foreground">
+          {draft.category} · model {draft.model} · created {formatIst(draft.createdAt)}
+        </span>
+      </div>
       <p
         className={cn(
-          "mt-4 rounded-2xl px-4 py-3 text-xs",
-          ready ? "bg-muted text-muted-foreground" : "bg-warning-soft text-warning",
+          "rounded-2xl px-4 py-3",
+          draft.readiness === "ready_for_review"
+            ? "bg-muted text-muted-foreground"
+            : "bg-warning-soft text-warning",
         )}
       >
         {draft.readinessReason}
       </p>
 
-      <details className="mt-3 text-sm">
-        <summary className="rounded text-xs font-medium hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
-          Read draft, SEO fields and claim-to-evidence mapping
-        </summary>
-        <div className="mt-3 space-y-4">
-          <div className="max-w-prose whitespace-pre-line">{draft.body}</div>
-          <dl className="grid gap-2 text-xs sm:grid-cols-[8rem_1fr]">
-            <dt className="text-muted-foreground">SEO title</dt>
-            <dd>{draft.seoTitle}</dd>
-            <dt className="text-muted-foreground">SEO description</dt>
-            <dd>{draft.seoDescription}</dd>
-          </dl>
-          <div className="text-xs">
-            <p className="font-medium">Verified claims used</p>
-            <ul className="mt-1 space-y-1.5">
-              {draft.claimEvidence.map((c) => (
-                <li key={c.claim}>
-                  <p>{c.claim}</p>
-                  {c.evidenceUrls.map((url) => (
-                    <p key={url} className="flex min-w-0 pl-3">
-                      <SourceLink href={url}>{url}</SourceLink>
-                    </p>
-                  ))}
-                </li>
+      <div>
+        <p className="text-sm font-medium">{draft.summary}</p>
+        <div className="mt-3 max-w-prose text-sm whitespace-pre-line">{draft.body}</div>
+      </div>
+
+      <dl className="grid gap-2 sm:grid-cols-[8rem_1fr]">
+        <dt className="text-muted-foreground">SEO title</dt>
+        <dd>{draft.seoTitle}</dd>
+        <dt className="text-muted-foreground">SEO description</dt>
+        <dd>{draft.seoDescription}</dd>
+        <dt className="text-muted-foreground">Tags</dt>
+        <dd className="flex flex-wrap gap-1">
+          {draft.tags.map((t) => (
+            <Badge key={t} variant="outline">
+              {t}
+            </Badge>
+          ))}
+        </dd>
+      </dl>
+
+      <div>
+        <h3 className="text-sm font-semibold">Checks</h3>
+        <ul className="mt-2 space-y-1">
+          {draft.checks.map((c) => (
+            <li key={c.check} className="flex items-start gap-1.5">
+              {c.passed ? (
+                <CircleCheck aria-hidden className="mt-0.5 size-3.5 shrink-0 text-success" />
+              ) : (
+                <CircleX aria-hidden className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+              )}
+              <span>
+                {CHECK_LABEL[c.check]}
+                {c.note && <span className="text-muted-foreground"> · {c.note}</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold">Claims and evidence</h3>
+        <ul className="mt-2 space-y-2">
+          {draft.claimEvidence.map((c) => (
+            <li key={c.claim} className="rounded-2xl bg-muted px-4 py-3">
+              <p className="font-medium">{c.claim}</p>
+              {c.evidenceUrls.map((url) => (
+                <p key={url} className="mt-1 flex min-w-0 items-baseline gap-2">
+                  <span
+                    className={
+                      official.has(url) ? "shrink-0 text-success" : "shrink-0 text-muted-foreground"
+                    }
+                  >
+                    {official.has(url) ? "Official" : "Secondary"}
+                  </span>
+                  <SourceLink href={url}>{url}</SourceLink>
+                </p>
               ))}
-            </ul>
-          </div>
+            </li>
+          ))}
+        </ul>
+        {draft.secondaryEvidenceUrls.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {draft.secondaryEvidenceUrls.map((url) => (
+              <li key={url} className="flex min-w-0 items-baseline gap-2">
+                <span className="shrink-0 text-muted-foreground">Secondary</span>
+                <SourceLink href={url}>{url}</SourceLink>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-2 flex min-w-0 items-baseline gap-2">
+          <span className="shrink-0 font-medium">Original · {draft.publisher}</span>
+          <SourceLink href={draft.originalUrl}>{draft.originalUrl}</SourceLink>
+        </p>
+      </div>
+
+      {draft.missingEvidenceWarnings.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-warning">
+            Not confirmed (must not appear as fact)
+          </h3>
+          <ul className="mt-2 list-disc space-y-0.5 pl-5 text-muted-foreground">
+            {draft.missingEvidenceWarnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
         </div>
-      </details>
-    </li>
+      )}
+    </div>
   );
 }
 
@@ -192,8 +308,8 @@ function EmptyState({ filtered, hasRun }: { filtered: boolean; hasRun: boolean }
     ? ["No articles in this view", "Articles with this status will appear here."]
     : hasRun
       ? [
-          "Drafting not started yet",
-          "This run discovered stories only. Verification and drafting come in later steps.",
+          "No drafts",
+          "No story was verified strongly enough to draft, or drafting failed. See the Verification section and the run summary.",
         ]
       : [
           "No research results yet",
