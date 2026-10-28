@@ -173,13 +173,16 @@ export function Dashboard() {
     }
   }
 
-  /** Re-verifies only failed / not-processed stories of the current run (same Run ID). */
-  async function retryVerification() {
+  /**
+   * Re-runs one stage for the current run (same Run ID): "verify" re-verifies failed /
+   * unfinished stories, "draft" drafts queued stories without a draft.
+   */
+  async function retry(stage: "verify" | "draft") {
     if (running || !run) return;
     setResearchStatus("running");
     setError(null);
     try {
-      const start = await fetch(`/api/research/${run.runId}/verify`, { method: "POST" });
+      const start = await fetch(`/api/research/${run.runId}/${stage}`, { method: "POST" });
       if (!start.ok) throw new Error(await readError(start, `Retry failed (${start.status}).`));
       await follow(run.runId);
     } catch (e) {
@@ -248,11 +251,18 @@ export function Dashboard() {
             disabled={running}
           />
           {run && <DiscoveredStories run={run} />}
-          {run && <VerificationReview run={run} onRetry={retryVerification} retrying={running} />}
+          {run && (
+            <VerificationReview run={run} onRetry={() => retry("verify")} retrying={running} />
+          )}
           <ArticleReview
             drafts={drafts}
-            hasRun={researchStatus === "done"}
+            hasRun={researchStatus === "done" || (run !== null && !running)}
             onPublish={() => setDialog("publish")}
+            pending={(run?.draftQueue ?? [])
+              .filter((q) => !drafts.some((d) => d.candidateId === q.candidateId))
+              .map((q) => ({ headline: q.headline, reason: q.draftError ?? "Not drafted yet." }))}
+            onRetryDrafts={() => retry("draft")}
+            busy={running}
           />
         </div>
       </div>

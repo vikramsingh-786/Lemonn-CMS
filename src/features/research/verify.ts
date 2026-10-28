@@ -19,7 +19,7 @@ import {
   searchOfficialDomain,
   type DomainCheck,
 } from "./official-domains";
-import { saveRun } from "./run-store";
+import { saveEvidence, saveRun } from "./run-store";
 import { searchOfficial, searchWeb, type TavilyAccess } from "./tavily";
 import {
   DRAFT_TARGET,
@@ -316,6 +316,20 @@ async function verifyCandidate(c: CandidateReport, ctx: Ctx): Promise<void> {
       e.record.excerpt = (excerpt.split(" … ")[1] ?? excerpt).slice(0, 300);
     }
     c.evidence = items.map((e) => e.record);
+    // The passages the matcher sees are kept server-side for drafting (Step 6).
+    void saveEvidence(
+      run.runId,
+      Object.fromEntries(
+        toModel.map((e) => [
+          e.record.id,
+          {
+            text: excerpts.get(e.record.id)!,
+            organisation: e.record.organisation,
+            url: e.record.url,
+          },
+        ]),
+      ),
+    );
     c.primaryEvidenceFound = items.some(
       (e) => e.record.kind === "primary" && e.record.retrieval === "page",
     );

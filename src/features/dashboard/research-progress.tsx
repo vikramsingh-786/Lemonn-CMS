@@ -12,6 +12,7 @@ const STAGE_LABEL: Record<ResearchRun["stage"], string> = {
   discovering: "Discovering stories",
   expanding: "Expanding search",
   ranking: "Cleaning and ranking",
+  drafting: "Drafting articles",
   processing: "Verifying claims",
   completed: "Completed",
   failed: "Failed",

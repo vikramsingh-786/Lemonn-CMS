@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { FetchError } from "@/lib/safe-fetch";
+import { TOPICS } from "./topics";
 
 const TIMEOUT_MS = 45_000;
 const MAX_RETRIES = 2;
@@ -53,6 +54,7 @@ async function geminiJson<T>(opts: {
   output: z.ZodType<T>;
   maxOutputTokens: number;
   timeoutMs?: number;
+  temperature?: number;
 }): Promise<T> {
   const { access } = opts;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${access.model}:generateContent`;
@@ -63,7 +65,7 @@ async function geminiJson<T>(opts: {
       responseMimeType: "application/json",
       responseSchema: opts.responseSchema,
       maxOutputTokens: opts.maxOutputTokens,
-      temperature: 0,
+      temperature: opts.temperature ?? 0,
     },
   });
 
@@ -362,4 +364,78 @@ export async function matchEvidence(
     timeoutMs: 120_000,
   });
   return links;
+}
+
+/* ---------- Step 6: drafting ---------- */
+
+const CATEGORIES = TOPICS.map((t) => t.name);
+
+export type DraftInput = {
+  verifiedClaims: {
+    id: string;
+    claim: string;
+    authority: string;
+    figures: string[];
+    evidence: { organisation: string; url: string; passage: string }[];
+  }[];
+  unconfirmed: string[];
+  originalReport: { publisher: string; url: string; publishedAt: string | null };
+};
+
+const draftOutput = z.object({
+  headline: z.string().min(1).max(400),
+  summary: z.string().min(1).max(1000),
+  body: z.string().min(1).max(6000),
+  seoTitle: z.string().min(1).max(300),
+  seoDescription: z.string().min(1).max(600),
+  category: z.enum(CATEGORIES as [string, ...string[]]),
+  tags: z.array(z.string().min(1).max(60)).max(10),
+  claimIdsUsed: z.array(z.string().max(10)).max(20),
+});
+export type DraftOutput = z.infer<typeof draftOutput>;
+
+const DRAFT_PROMPT = `You write original news articles for Lemonn, an Indian stock-broking app, for Indian retail investors.
+
+The user message is JSON: {verifiedClaims:[{id, claim, authority, figures, evidence:[{organisation, url, passage}]}], unconfirmed:[...], originalReport:{publisher, url, publishedAt}}.
+${UNTRUSTED}
+
+Rules:
+- State as fact ONLY what the verified claims and their evidence passages say. Never add figures, dates, names, quotes, events, causes or forecasts.
+- Items in "unconfirmed" are NOT verified: leave them out, or say plainly that they are "not yet confirmed". Never state them as fact.
+- Attribute every fact to its official source, e.g. "according to the company's filing with BSE" or "SEBI said in a circular".
+- Write in your own words. Never copy sentences from the evidence passages or from any publisher.
+- Neutral, factual tone. No investment advice, recommendations, buy/sell calls, price targets or predictions.
+- Do not mention the original report's publisher as the source of facts; the official sources are the sources.
+
+Return JSON:
+- headline: at most 110 characters, no unconfirmed detail
+- summary: 1-2 sentences
+- body: 150-300 words, plain text (no markdown), short paragraphs separated by a blank line
+- seoTitle: at most 60 characters
+- seoDescription: at most 155 characters
+- category: one of ${CATEGORIES.join(", ")}
+- tags: 2-5 short tags
+- claimIdsUsed: the ids of the verified claims you relied on (e.g. ["K1","K2"])`;
+
+/** One original article from verified claims only (reasoning model, temperature 0.3). */
+export async function draftArticle(input: DraftInput, access: GeminiAccess): Promise<DraftOutput> {
+  return geminiJson({
+    access,
+    system: DRAFT_PROMPT,
+    input,
+    responseSchema: objectOf({
+      headline: str,
+      summary: str,
+      body: str,
+      seoTitle: str,
+      seoDescription: str,
+      category: enumOf(CATEGORIES),
+      tags: strArray,
+      claimIdsUsed: strArray,
+    }),
+    output: draftOutput,
+    maxOutputTokens: 8192,
+    timeoutMs: 60_000,
+    temperature: 0.3,
+  });
 }

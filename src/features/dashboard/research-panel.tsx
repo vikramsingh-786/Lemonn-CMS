@@ -27,8 +27,8 @@ const STEPS = [
   { key: "draft", label: "Draft", detail: "Verified stories only", icon: Sparkles },
 ] as const satisfies readonly { key: PipelineStep; [k: string]: unknown }[];
 
-/** Steps the server has built so far (Discover → Verify); Draft stays idle. */
-const BUILT_STEPS = 4;
+/** Steps the server has built so far (all five). */
+const BUILT_STEPS = 5;
 
 /**
  * Step states from the server's real current step (no invented progress). Evidence and Verify
@@ -66,7 +66,9 @@ function stepDetail(key: PipelineStep, fallback: string, run: ResearchRun | null
       ? `${run.counts.pagesFetched} official pages read`
       : `${run.counts.verified} verified · ${run.counts.held} held`;
   }
-  return "Not started yet";
+  if (run.stage === "drafting") return run.stageDetail;
+  if (run.stage !== "completed" && run.drafts.length === 0) return fallback;
+  return `${run.drafts.length} of ${run.draftQueue.length} queued drafted (max ${run.draftTarget})`;
 }
 
 type ResearchPanelProps = {
@@ -172,7 +174,8 @@ export function ResearchPanel({
               Ranked {run.candidates.length}{" "}
               {run.candidates.length === 1 ? "candidate" : "candidates"}; {run.counts.verified} of{" "}
               {run.counts.processed} checked {run.counts.processed === 1 ? "story" : "stories"}{" "}
-              fully verified; {run.draftQueue.length} of {run.draftTarget} queued for drafting.
+              fully verified; {run.drafts.length} draft{run.drafts.length === 1 ? "" : "s"} written
+              for human review.
             </span>
           </p>
         )}

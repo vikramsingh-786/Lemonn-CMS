@@ -11,15 +11,22 @@ const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // ponytail: local JSON files (.data/runs) + in-memory cache, one active run per server process.
 // A database + job queue replaces this when the persistence phase starts.
 // Kept on globalThis so dev hot reloads and separate route bundles share one registry.
-const store = ((
-  globalThis as {
-    __researchRuns?: {
-      runs: Map<string, ResearchRun>;
-      active: string | null;
-      writes: Map<string, Promise<void>>;
-    };
-  }
-).__researchRuns ??= { runs: new Map(), active: null, writes: new Map() });
+type Store = {
+  runs: Map<string, ResearchRun>;
+  active: string | null;
+  writes: Map<string, Promise<void>>;
+  /** Server-only evidence passages per run (sidecar files), for drafting. */
+  evidence?: Map<string, Record<string, EvidencePassage>>;
+};
+const store: Store = ((globalThis as { __researchRuns?: Store }).__researchRuns ??= {
+  runs: new Map(),
+  active: null,
+  writes: new Map(),
+});
+const evidenceStore = (store.evidence ??= new Map());
+
+/** The official-text passage an evidence item was matched on. Server-only; never sent to a browser. */
+export type EvidencePassage = { text: string; organisation: string; url: string };
 
 /** Only server-generated UUIDs reach the file system (no path traversal). */
 export function isRunId(id: string): boolean {
@@ -88,37 +95,77 @@ function markInterrupted(run: ResearchRun) {
   }
 }
 
-/**
- * Writes the run to .data/runs/<id>.json (atomic: temp file + rename). Writes for one run are
- * queued so an older snapshot never overwrites a newer one. Failures are swallowed: the run
- * itself keeps going in memory.
- */
-export function saveRun(run: ResearchRun): Promise<void> {
-  const json = JSON.stringify(run);
-  const file = path.join(DIR, `${run.runId}.json`);
-  const previous = store.writes.get(run.runId) ?? Promise.resolve();
+/** Queues an atomic write of `json` to `file` behind earlier writes with the same key. */
+function queueWrite(key: string, file: string, json: string): Promise<void> {
+  const previous = store.writes.get(key) ?? Promise.resolve();
   const next = previous
     .then(async () => {
       await mkdir(DIR, { recursive: true });
       const tmp = `${file}.${process.pid}.tmp`;
       await writeFile(tmp, json, "utf8");
       await rename(tmp, file);
-      await prune();
     })
     .catch(() => {});
-  store.writes.set(run.runId, next);
+  store.writes.set(key, next);
   return next;
 }
 
-/** Keeps the newest MAX_FILES runs on disk. */
+/**
+ * Adds evidence passages (by evidence id) to the run's server-only sidecar
+ * `.data/runs/<id>.evidence.json`. No API route reads this file.
+ */
+export function saveEvidence(
+  runId: string,
+  passages: Record<string, EvidencePassage>,
+): Promise<void> {
+  if (!isRunId(runId)) return Promise.resolve();
+  const merged = { ...evidenceStore.get(runId), ...passages };
+  evidenceStore.set(runId, merged);
+  return queueWrite(
+    `${runId}:evidence`,
+    path.join(DIR, `${runId}.evidence.json`),
+    JSON.stringify(merged),
+  );
+}
+
+/** Evidence passages for a run (memory, else disk); empty when the run has none (older runs). */
+export async function loadEvidence(runId: string): Promise<Record<string, EvidencePassage>> {
+  if (!isRunId(runId)) return {};
+  const inMemory = evidenceStore.get(runId);
+  if (inMemory) return inMemory;
+  try {
+    const passages = JSON.parse(
+      await readFile(path.join(DIR, `${runId}.evidence.json`), "utf8"),
+    ) as Record<string, EvidencePassage>;
+    evidenceStore.set(runId, passages);
+    return passages;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Writes the run to .data/runs/<id>.json (atomic: temp file + rename). Writes for one run are
+ * queued so an older snapshot never overwrites a newer one. Failures are swallowed: the run
+ * itself keeps going in memory.
+ */
+export function saveRun(run: ResearchRun): Promise<void> {
+  const write = queueWrite(run.runId, path.join(DIR, `${run.runId}.json`), JSON.stringify(run));
+  return write.then(() => prune().catch(() => {}));
+}
+
+/** Keeps the newest MAX_FILES runs on disk (each with its evidence sidecar). */
 async function prune() {
-  const names = (await readdir(DIR)).filter((n) => n.endsWith(".json"));
+  const names = (await readdir(DIR)).filter((n) => /^[0-9a-f-]{36}\.json$/.test(n));
   if (names.length <= MAX_FILES) return;
   const withTime = await Promise.all(
     names.map(async (n) => ({ n, t: (await stat(path.join(DIR, n))).mtimeMs })),
   );
   withTime.sort((a, b) => a.t - b.t);
   for (const { n } of withTime.slice(0, withTime.length - MAX_FILES)) {
+    const id = n.slice(0, -".json".length);
+    evidenceStore.delete(id);
     await unlink(path.join(DIR, n)).catch(() => {});
+    await unlink(path.join(DIR, `${id}.evidence.json`)).catch(() => {});
   }
 }

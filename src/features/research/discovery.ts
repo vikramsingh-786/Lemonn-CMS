@@ -4,6 +4,7 @@ import { sourceDomain, type NewsSource } from "@/features/dashboard/data";
 import { pool } from "@/lib/pool";
 import { FetchError, isWithinDomain } from "@/lib/safe-fetch";
 import type { ServerEnv } from "@/lib/env";
+import { draftRun } from "./draft";
 import { rankRun } from "./rank";
 import { addRun, claimActive, getRun, releaseActive, saveRun } from "./run-store";
 import { NEWS_SITEMAPS, readNewsSitemaps, type RawItem } from "./sitemaps";
@@ -97,6 +98,8 @@ export function startRun(
       await rankRun(run, { apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL_FAST });
       void saveRun(run);
       await verifyRun(run, env);
+      void saveRun(run);
+      await draftRun(run, env);
       completeRun(run);
     } catch {
       run.stage = "failed";
@@ -116,7 +119,7 @@ function completeRun(run: ResearchRun) {
   run.error = null;
   run.stageDetail =
     run.counts.processed > 0
-      ? `Verified ${run.counts.verified} of ${run.counts.processed} checked stories; ${run.draftQueue.length} queued for drafting`
+      ? `Verified ${run.counts.verified} of ${run.counts.processed} checked stories; ${run.drafts.length} of ${run.draftQueue.length} queued stories drafted`
       : `Ranked ${run.candidates.length} candidate${run.candidates.length === 1 ? "" : "s"} from ${run.items.length} discovered stor${run.items.length === 1 ? "y" : "ies"}`;
 }
 
@@ -140,6 +143,7 @@ export async function startVerificationRetry(runId: string, env: ServerEnv): Pro
   const work = async () => {
     try {
       await verifyRun(run, env, { retry: true });
+      await draftRun(run, env); // drafts only newly queued stories
       completeRun(run);
     } catch {
       run.stage = "failed";
@@ -259,4 +263,38 @@ async function discoverSource(run: ResearchRun, source: NewsSource, tavilyKey: s
     run.coverage.push(coverage); // only finished sources appear in coverage
     run.timings.push({ stage: source.name, ms: Date.now() - started });
   }
+}
+
+/**
+ * (Re)drafts draft-queue stories that have no draft yet or whose drafting failed (same Run ID).
+ * Discovery, ranking and verification are not repeated.
+ */
+export async function startDraftRetry(runId: string, env: ServerEnv): Promise<RetryStart> {
+  const run = await getRun(runId);
+  if (!run) return { ok: false, status: 404, message: "Research run not found." };
+  const pending = run.draftQueue.filter(
+    (q) => !run.drafts.some((d) => d.candidateId === q.candidateId),
+  );
+  if (pending.length === 0)
+    return { ok: false, status: 409, message: "Every queued story already has a draft." };
+  if (!claimActive(runId))
+    return { ok: false, status: 409, message: "A research run is already in progress." };
+  run.stage = "drafting";
+  run.error = null;
+  run.finishedAt = null;
+  const work = async () => {
+    try {
+      await draftRun(run, env);
+      completeRun(run);
+    } catch {
+      run.stage = "failed";
+      run.error = { code: "internal_error", message: "Drafting failed unexpectedly." };
+    } finally {
+      run.currentStep = null;
+      run.finishedAt = new Date().toISOString();
+      releaseActive(runId);
+      await saveRun(run);
+    }
+  };
+  return { ok: true, work };
 }
