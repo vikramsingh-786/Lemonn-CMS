@@ -70,6 +70,7 @@ type ResearchPanelProps = {
   status: ResearchStatus;
   run: ResearchRun | null;
   error: string | null;
+  notice?: string | null;
   enabledSources: number;
   totalSources: number;
   onResearch: () => void;
@@ -80,6 +81,7 @@ export function ResearchPanel({
   status,
   run,
   error,
+  notice,
   enabledSources,
   totalSources,
   onResearch,
@@ -154,6 +156,12 @@ export function ResearchPanel({
       </ol>
 
       <div role="status" aria-live="polite">
+        {notice && (
+          <p className="mt-5 flex items-start gap-2.5 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+            <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />
+            <span>{notice}</span>
+          </p>
+        )}
         {running && (
           <p className="mt-5 flex items-start gap-2.5 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
             <LoaderCircle aria-hidden className="mt-0.5 size-4 shrink-0 animate-spin" />
