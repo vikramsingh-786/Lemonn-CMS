@@ -35,10 +35,12 @@ pnpm dev                              # http://localhost:3000
 
 ## Environment variables
 
-| Variable         | Needed for                  | Notes                                                                               |
-| ---------------- | --------------------------- | ----------------------------------------------------------------------------------- |
-| `DATABASE_URL`   | Prisma CLI, database access | The CMS's own PostgreSQL. Never Lemonn production.                                  |
-| `TAVILY_API_KEY` | Research discovery          | Tavily Search API. Needed for Reuters/NSE/BSE and sitemap fallback. Spends credits. |
+| Variable            | Needed for                  | Notes                                                                                |
+| ------------------- | --------------------------- | ------------------------------------------------------------------------------------ |
+| `DATABASE_URL`      | Prisma CLI, database access | The CMS's own PostgreSQL. Never Lemonn production.                                   |
+| `GEMINI_API_KEY`    | Research ranking (Step 4)   | Optional. Gemini relevance screen; without it ranking is rules-only. Spends credits. |
+| `GEMINI_MODEL_FAST` | Research ranking (Step 4)   | Optional. Default `gemini-3.5-flash-lite`; falls back to legacy `GEMINI_MODEL`.      |
+| `TAVILY_API_KEY`    | Research discovery          | Tavily Search API. Needed for Reuters/NSE/BSE and sitemap fallback. Spends credits.  |
 
 All variables are server-only. Validate new ones with Zod on the server and add a placeholder to
 `.env.example`.

@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { sourceDomain, type NewsSource } from "@/features/dashboard/data";
 import { FetchError, isWithinDomain } from "@/lib/safe-fetch";
+import { rankRun, type GeminiConfig } from "./rank";
 import { NEWS_SITEMAPS, readNewsSitemaps, type RawItem } from "./sitemaps";
 import { searchTavily } from "./tavily";
 import { TOPICS, classifyTopics } from "./topics";
@@ -39,6 +40,7 @@ export function startRun(
   sources: readonly NewsSource[],
   window: ResearchRun["window"],
   tavilyKey: string | undefined,
+  gemini: GeminiConfig,
 ): { runId: string; work: () => Promise<void> } | null {
   if (store.active) return null;
   const run: ResearchRun = {
@@ -52,6 +54,7 @@ export function startRun(
     draftTarget: DRAFT_TARGET,
     coverage: [],
     items: [],
+    excluded: [],
     topicCounts: Object.fromEntries(TOPICS.map((t) => [t.name, 0])),
     counts: {
       resultsFound: 0,
@@ -92,10 +95,12 @@ export function startRun(
       if (run.coverage.every((c) => c.status === "failed")) {
         run.stage = "failed";
         run.error = { code: "provider_unavailable", message: "Every enabled source failed." };
-      } else {
-        run.stage = "completed";
+        run.stageDetail = "Discovery failed for every source";
+        return;
       }
-      run.stageDetail = `Discovered ${run.items.length} stor${run.items.length === 1 ? "y" : "ies"} on the 8 topics`;
+      await rankRun(run, gemini);
+      run.stage = "completed";
+      run.stageDetail = `Ranked ${run.candidates.length} candidate${run.candidates.length === 1 ? "" : "s"} from ${run.items.length} discovered stor${run.items.length === 1 ? "y" : "ies"}`;
     } catch {
       run.stage = "failed";
       run.error = { code: "internal_error", message: "Research failed unexpectedly." };
