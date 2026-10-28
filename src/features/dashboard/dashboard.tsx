@@ -11,10 +11,9 @@ import type {
 } from "@/features/research/types";
 import { AddSourceDialog } from "./add-source-dialog";
 import { ArticleReview } from "./article-review";
-import { CandidateReview } from "./candidate-review";
+import { DiscoveredStories } from "./discovered-stories";
 import { DashboardSummary } from "./dashboard-summary";
 import { DEFAULT_SOURCES, type ResearchStatus, sourceDomain } from "./data";
-import { DiscoveredStories } from "./discovered-stories";
 import { NewsSources } from "./news-sources";
 import { ResearchControls } from "./research-controls";
 import { ResearchFeed, ResearchPanel } from "./research-panel";
@@ -201,8 +200,7 @@ export function Dashboard() {
             onRemove={removeSource}
             disabled={running}
           />
-          {run && <DiscoveredStories items={run.items} />}
-          {run && <CandidateReview candidates={run.candidates} />}
+          {run && <DiscoveredStories run={run} />}
           <ArticleReview
             drafts={drafts}
             hasRun={researchStatus === "done"}

@@ -13,7 +13,7 @@ type ResearchControlsProps = {
 function researchHint(enabledSources: number): string {
   return enabledSources === 0
     ? "Enable at least one source to research."
-    : "Tavily search → evidence → Gemini verification → drafts.";
+    : "Discover → rank → verify → draft.";
 }
 
 export function ResearchControls({

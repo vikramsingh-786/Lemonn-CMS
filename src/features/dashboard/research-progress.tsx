@@ -11,6 +11,7 @@ const COVERAGE_ICON: Record<SourceCoverage["status"], React.ReactNode> = {
 const STAGE_LABEL: Record<ResearchRun["stage"], string> = {
   discovering: "Discovering stories",
   expanding: "Expanding search",
+  ranking: "Cleaning and ranking",
   processing: "Verifying and drafting",
   completed: "Completed",
   failed: "Failed",
@@ -41,13 +42,15 @@ export function ResearchProgress({ run }: { run: ResearchRun }) {
   const stats = [
     ["In window", counts.resultsFound],
     ["Off-topic", run.coverage.reduce((n, c) => n + c.offTopic, 0)],
-    ["Kept", run.items.length],
+    ["Discovered", run.items.length],
+    ["Duplicates merged", counts.duplicatesRemoved],
+    ["Excluded", run.excluded.length],
+    ["Candidates", counts.uniqueCandidates],
     [
       "Sources OK",
       `${run.coverage.filter((c) => c.status === "ok").length} / ${run.coverage.length}`,
     ],
-    ["Tavily calls", counts.searchesUsed],
-    ["Verify & draft", "Not started"],
+    ["Tavily · AI calls", `${counts.searchesUsed} · ${counts.aiCallsUsed}`],
   ] as const;
   const topics = Object.entries(run.topicCounts);
   const errors = Object.entries(run.errorCounts);
@@ -68,7 +71,7 @@ export function ResearchProgress({ run }: { run: ResearchRun }) {
       </div>
       <p className="mt-1.5 text-sm text-muted-foreground">{run.stageDetail}</p>
 
-      <dl className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <dl className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {stats.map(([label, value]) => (
           <div key={label} className="pill-raised rounded-2xl bg-muted px-3.5 py-2">
             <dt className="text-xs text-muted-foreground">{label}</dt>

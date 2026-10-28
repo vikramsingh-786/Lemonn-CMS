@@ -1,6 +1,7 @@
 import {
   ArrowUpRight,
   Check,
+  ListOrdered,
   CircleAlert,
   CircleCheck,
   FileText,
@@ -20,25 +21,38 @@ type StepState = "idle" | "active" | "done";
 
 const STEPS = [
   { key: "discover", label: "Discover", detail: "News sitemaps + Tavily, last 24h", icon: Search },
+  { key: "rank", label: "Rank", detail: "Clean, de-duplicate, score", icon: ListOrdered },
   { key: "evidence", label: "Evidence", detail: "Official + independent sources", icon: FileText },
   { key: "verify", label: "Verify", detail: "Gemini claims + rules gate", icon: ShieldCheck },
   { key: "draft", label: "Draft", detail: "Verified stories only", icon: Sparkles },
 ] as const satisfies readonly { key: PipelineStep; [k: string]: unknown }[];
 
-/** Step states from the server's real progress. Only Discover is built so far. */
-export function stepStates(status: ResearchStatus): StepState[] {
-  if (status === "done") return ["done", "idle", "idle", "idle"];
-  if (status === "running") return ["active", "idle", "idle", "idle"];
-  return ["idle", "idle", "idle", "idle"];
+/** Steps the server has built so far (Discover, Rank); the rest stay idle. */
+const BUILT_STEPS = 2;
+
+/** Step states from the server's real current step (no invented progress). */
+export function stepStates(status: ResearchStatus, run: ResearchRun | null): StepState[] {
+  if (status === "done") return STEPS.map((_, i) => (i < BUILT_STEPS ? "done" : "idle"));
+  if (status !== "running") return STEPS.map(() => "idle");
+  const current = STEPS.findIndex((step) => step.key === (run?.currentStep ?? "discover"));
+  return STEPS.map((_, i) => (i < current ? "done" : i === current ? "active" : "idle"));
 }
 
-/** Live counts under Discover once there is data; later steps aren't built yet. */
+/** Live counts under Discover and Rank once there is data; later steps aren't built yet. */
 function stepDetail(key: PipelineStep, fallback: string, run: ResearchRun | null): string {
   if (!run) return fallback;
-  if (key !== "discover") return "Not started yet";
-  return run.stage === "discovering"
-    ? run.stageDetail
-    : `${run.counts.resultsFound} in window · ${run.items.length} on topic`;
+  if (key === "discover") {
+    return run.stage === "discovering"
+      ? run.stageDetail
+      : `${run.counts.resultsFound} in window · ${run.items.length} on topic`;
+  }
+  if (key === "rank") {
+    if (run.stage === "discovering") return fallback;
+    return run.stage === "ranking"
+      ? run.stageDetail
+      : `${run.candidates.length} candidates · ${run.excluded.length} excluded`;
+  }
+  return "Not started yet";
 }
 
 type ResearchPanelProps = {
@@ -59,7 +73,7 @@ export function ResearchPanel({
   totalSources,
   onResearch,
 }: ResearchPanelProps) {
-  const states = stepStates(status);
+  const states = stepStates(status, run);
   const running = status === "running";
 
   return (
@@ -141,8 +155,10 @@ export function ResearchPanel({
           <p className="mt-5 flex items-start gap-2.5 rounded-2xl bg-success-soft px-4 py-3 text-sm text-success">
             <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
             <span>
-              Discovery completed: {run.items.length} {run.items.length === 1 ? "story" : "stories"}{" "}
-              on the 8 topics. Verification and drafting are not started yet.
+              Ranked {run.candidates.length}{" "}
+              {run.candidates.length === 1 ? "candidate" : "candidates"} from {run.items.length}{" "}
+              discovered {run.items.length === 1 ? "story" : "stories"}. Verification and drafting
+              are not started yet.
             </span>
           </p>
         )}
@@ -172,9 +188,9 @@ export function ResearchPanel({
   );
 }
 
-/** Compact feed of the latest stories, like a trade feed; links into the full lists. */
+/** Compact feed of the top-ranked candidates; links into Discovered stories. */
 export function ResearchFeed({ run }: { run: ResearchRun | null }) {
-  const items = (run?.items ?? []).slice(0, 5);
+  const items = (run?.candidates ?? []).slice(0, 5);
   return (
     <section
       aria-labelledby="feed-heading"
@@ -193,13 +209,15 @@ export function ResearchFeed({ run }: { run: ResearchRun | null }) {
       ) : (
         <ul className="mt-4 flex flex-col gap-2">
           {items.map((item) => (
-            <li key={item.url}>
+            <li key={item.id}>
               <a
                 href="#discovered"
                 className="pill-raised flex items-center gap-3 rounded-full bg-muted py-2 pr-2 pl-4 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{item.title}</span>
+                  <span className="block truncate text-sm font-medium">
+                    #{item.rank} {item.headline}
+                  </span>
                   <span className="mt-0.5 block truncate text-xs text-muted-foreground">
                     {item.publisher} · {item.topics.join(", ")}
                   </span>

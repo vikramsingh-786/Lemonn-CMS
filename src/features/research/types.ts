@@ -5,10 +5,11 @@
 
 export const DRAFT_TARGET = 10;
 
-export type RunStage = "discovering" | "expanding" | "processing" | "completed" | "failed";
+export type RunStage =
+  "discovering" | "expanding" | "ranking" | "processing" | "completed" | "failed";
 
 /** The pipeline step the server most recently started (for live step display). */
-export type PipelineStep = "discover" | "evidence" | "verify" | "draft";
+export type PipelineStep = "discover" | "rank" | "evidence" | "verify" | "draft";
 
 export type CandidateStatus =
   | "queued"
@@ -57,7 +58,8 @@ export type CandidateReport = {
   publisher: string;
   /** Tavily's publication-date estimate for the original report. */
   publishedAt: string | null;
-  otherReports: { url: string; title: string; publisher: string }[];
+  /** Other reports of the same story, each with its own title (figures may differ). */
+  otherReports: { url: string; title: string; publisher: string; publishedAt: string | null }[];
   status: CandidateStatus;
   /** Why the gate reached this status (deterministic, from application code). */
   statusReason: string;
@@ -67,6 +69,25 @@ export type CandidateReport = {
   evidence: EvidenceRecord[];
   evidenceSearchFailures: number;
   draftId: string | null;
+  /** Step 4 rank score (rules, plus Gemini when screened). */
+  score: number;
+  /** Each score contribution, e.g. "recency +3 (2h old)". */
+  rankReasons: string[];
+  /** Union of the cluster's topics. */
+  topics: string[];
+  screenedBy: "rules" | "rules+gemini";
+};
+
+export type ExclusionReason =
+  "timestamp_unverified" | "future_dated" | "out_of_window" | "not_an_article" | "irrelevant";
+
+/** A discovered story dropped in Step 4, with why. Untrusted text: render as plain text. */
+export type ExcludedItem = {
+  url: string;
+  title: string;
+  publisher: string;
+  reason: ExclusionReason;
+  detail: string;
 };
 
 export type DraftReadiness = "ready_for_review" | "needs_recheck";
@@ -155,6 +176,8 @@ export type ResearchRun = {
   items: DiscoveredItem[];
   /** Kept items per topic name (an item can count under several topics). */
   topicCounts: Record<string, number>;
+  /** Stories dropped while cleaning/ranking (Step 4). */
+  excluded: ExcludedItem[];
   counts: RunCounts;
   candidates: CandidateReport[];
   drafts: ResearchDraft[];

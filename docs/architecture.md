@@ -12,7 +12,9 @@ run in server memory and `GET /api/research/[runId]` returns its progress. Disco
 publishers' Google News sitemaps (config in `src/features/research/sitemaps.ts`) or, for sources
 without one, searches Tavily. It keeps stories from the last 24 hours on 8 topics
 (`src/features/research/topics.ts`), at most 20 per source. Publisher fetches go through
-`src/lib/safe-fetch.ts`. There is still no database, queue, worker, auth, verification or drafting.
+`src/lib/safe-fetch.ts`. Step 4 (`rank.ts`, weights in `rank-config.ts`) then drops undated and
+non-article items, merges duplicate reports, scores candidates with rules and, when
+`GEMINI_API_KEY` is set, adds a Gemini relevance screen (`gemini.ts`), falling back to rules only. There is still no database, queue, worker, auth, verification or drafting.
 Runs are lost on restart.
 
 ## System boundaries
