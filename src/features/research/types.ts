@@ -318,6 +318,5 @@ export type ConfiguredSource = {
   name: string;
   url: string;
   domain: string;
-  isPrimarySource: boolean;
   enabled: boolean;
 };

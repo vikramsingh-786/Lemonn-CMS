@@ -4,8 +4,6 @@ export type NewsSource = {
   /** Starting URL only — not a feed or extraction endpoint. Research searches this domain via Tavily; it is never crawled. */
   url: string;
   enabled: boolean;
-  /** Exchange/regulator source: counts as primary evidence for verification status. */
-  isPrimarySource?: boolean;
 };
 
 /** Domain used for Tavily's include_domains filter, e.g. "economictimes.indiatimes.com". */
@@ -57,20 +55,6 @@ export const DEFAULT_SOURCES: readonly NewsSource[] = [
     name: "Financial Express Markets",
     url: "https://www.financialexpress.com/market/",
     enabled: false,
-  },
-  {
-    id: "nse",
-    name: "NSE India",
-    url: "https://www.nseindia.com/",
-    enabled: false,
-    isPrimarySource: true,
-  },
-  {
-    id: "bse",
-    name: "BSE India",
-    url: "https://www.bseindia.com/",
-    enabled: false,
-    isPrimarySource: true,
   },
 ];
 

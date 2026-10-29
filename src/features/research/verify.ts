@@ -65,7 +65,7 @@ const TIME_BOUND = new Set([
   "market_movement",
 ]);
 /** Major publishers for independent corroboration (secondary evidence only). */
-const NEWS_DOMAINS = DEFAULT_SOURCES.filter((s) => !s.isPrimarySource).map(sourceDomain);
+const NEWS_DOMAINS = DEFAULT_SOURCES.map(sourceDomain);
 
 const MUTUAL_FUND = /mutual fund|\bnav\b|\bamc\b|\bscheme\b|\bsip\b|\bnfo\b|\betf\b/i;
 const INDIAN = /₹|\brs\.?\s|\binr\b|crore|lakh|\bindia|\bsebi\b|\brbi\b|\bnse\b|\bbse\b/i;

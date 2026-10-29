@@ -43,7 +43,6 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 }
 
 function sourcePoints(sourceId: string): number {
-  if ((C.exchangeSourceIds as readonly string[]).includes(sourceId)) return C.exchangePoints;
   if ((C.majorSourceIds as readonly string[]).includes(sourceId)) return C.majorPoints;
   return C.otherPoints;
 }
@@ -150,10 +149,7 @@ function scoreCluster(cluster: Cluster, windowEnd: number): { score: number; rea
   );
 
   const src = sourcePoints(lead.sourceId);
-  add(
-    src,
-    `source {p} (${src === C.exchangePoints ? "exchange" : src === C.majorPoints ? "major publisher" : "other"})`,
-  );
+  add(src, `source {p} (${src === C.majorPoints ? "major publisher" : "other"})`);
 
   const topics = clusterTopics(cluster);
   const best = Math.max(0, ...topics.map((t) => C.topicPoints[t] ?? 0));
