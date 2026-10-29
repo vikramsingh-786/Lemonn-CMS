@@ -2,7 +2,7 @@ import { connection } from "next/server";
 import { getRun } from "@/features/research/run-store";
 import type { ApiErrorBody } from "@/features/research/types";
 
-/** Snapshot of a research run (memory, else .data/runs), polled by the dashboard. */
+/** Snapshot of a research run from the database (no evidence passages). */
 export async function GET(_request: Request, ctx: RouteContext<"/api/research/[runId]">) {
   await connection();
   const { runId } = await ctx.params;

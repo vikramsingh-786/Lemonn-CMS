@@ -4,7 +4,7 @@ Standalone internal CMS that will become Lemonn's AI-assisted financial news too
 It is fully separate from the `lemonn.co.in` application: its own repo, database and deployment.
 
 **Status:** research pipeline prototype. The dashboard runs discovery, ranking, claim verification and
-drafting; runs are saved as local JSON. No database models, auth, worker, editing or publishing yet.
+drafting; runs are saved in PostgreSQL. No auth, worker, editing or publishing yet.
 
 ## Stack
 
@@ -15,7 +15,7 @@ Prisma 7 (PostgreSQL) · Zod 4 · ESLint · Prettier · Vitest · Playwright
 
 - Node.js ≥ 20.9
 - pnpm 10 (`corepack enable`, or `npx pnpm@10.34.7 <command>`)
-- PostgreSQL only when you start working on database features (not needed to build or run the app)
+- PostgreSQL for running research (runs are stored there); not needed to build the app
 
 ## Setup
 
@@ -50,7 +50,7 @@ See [.env.example](.env.example). All variables are server-only; never prefix se
 
 | Variable                   | Required for                           | Notes                                              |
 | -------------------------- | -------------------------------------- | -------------------------------------------------- |
-| `DATABASE_URL`             | Prisma CLI / database access           | The CMS's own PostgreSQL. Never Lemonn production. |
+| `DATABASE_URL`             | Research runs, Prisma CLI              | The CMS's own PostgreSQL. Never Lemonn production. |
 | `TAVILY_API_KEY`           | Verification; sources without sitemap  | Also the fallback when a sitemap fails             |
 | `GEMINI_API_KEY`           | Relevance screen, verification, drafts | Without it, ranking is rules only                  |
 | `GEMINI_MODEL_FAST`        | Optional                               | Default `gemini-3.5-flash-lite`                    |

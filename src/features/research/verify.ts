@@ -147,16 +147,16 @@ function countError(run: ResearchRun, provider: string, e: unknown) {
   run.errorCounts[key] = (run.errorCounts[key] ?? 0) + 1;
 }
 
-/** Budget relative to the calls already used when this pass started. */
+/** Budget for the pass: `max` calls counted from `atStart` (the counter when the pass began). */
 function budget(
   run: ResearchRun,
   field: "searchesUsed" | "aiCallsUsed",
+  atStart: number,
   max: number,
   name: string,
 ) {
-  const limit = run.counts[field] + max;
   return () => {
-    if (run.counts[field] >= limit)
+    if (run.counts[field] >= atStart + max)
       throw new FetchError(
         "budget",
         `${name} call limit for this verification pass (${max}) reached`,
@@ -174,16 +174,49 @@ function warnOnce(run: ResearchRun, message: string) {
   if (!run.warnings.includes(message)) run.warnings.push(message);
 }
 
+/** Statuses of a story waiting for (or interrupted during) verification in this pass. */
+const PENDING = new Set<CandidateStatus>(["queued", "pending_evidence", "verifying"]);
+
+/** Verifiable (official-announcement) stories first, then by rank. Same order on retries. */
+function verifyOrder(run: ResearchRun): CandidateReport[] {
+  return [...run.candidates].sort(
+    (a, b) => Number(b.verifiable === true) - Number(a.verifiable === true) || a.rank - b.rank,
+  );
+}
+
 /**
- * Step 5 on a run: verify the top candidates' material claims against official sources.
- * `retry`: only stories that failed or were not processed are verified again (same Run ID);
- * finished stories, discovery and ranking are left as they are.
+ * Starts a verification pass (Step 5): the top NEWS_RESEARCH_MAX_VERIFY stories are queued; the
+ * rest are not processed unless the pass extends. `retry`: only stories that failed or were not
+ * processed are queued again (same Run ID); finished stories are left as they are.
  */
-export async function verifyRun(
-  run: ResearchRun,
-  env: ServerEnv,
-  opts: { retry?: boolean } = {},
-): Promise<void> {
+export function beginVerifyPass(run: ResearchRun, env: ServerEnv, retry = false) {
+  const order = verifyOrder(run);
+  const limit = env.NEWS_RESEARCH_MAX_VERIFY;
+  if (!retry)
+    for (const c of order.slice(limit))
+      markNotProcessed(c, `Not in the top ${limit} verified per run (NEWS_RESEARCH_MAX_VERIFY).`);
+  for (const c of order.slice(0, limit)) {
+    if (retry && !RETRYABLE.has(c.status)) continue;
+    c.status = "queued";
+    c.statusReason = "Waiting for verification.";
+  }
+  run.verifyPass = {
+    startedAt: new Date().toISOString(),
+    searchesAtStart: run.counts.searchesUsed,
+    aiCallsAtStart: run.counts.aiCallsUsed,
+    extra: 0,
+    stopReason: null,
+  };
+  run.stage = "processing";
+  run.currentStep = "verify";
+}
+
+/**
+ * One verification step: verifies the next CONCURRENCY queued stories. When none are left and
+ * fewer than DRAFT_MIN stories meet the evidence bar, the pass extends to the next stories in the
+ * same order (up to MAX_EXTRA). Returns true when the pass is finished.
+ */
+export async function verifyStep(run: ResearchRun, env: ServerEnv): Promise<boolean> {
   const missing = [
     !env.TAVILY_API_KEY && "TAVILY_API_KEY",
     !env.GEMINI_API_KEY && "GEMINI_API_KEY",
@@ -191,76 +224,80 @@ export async function verifyRun(
   if (missing.length > 0 || run.candidates.length === 0) {
     if (missing.length > 0)
       warnOnce(run, `Verification skipped: ${missing.join(" and ")} not set. Stories stay queued.`);
-    return;
+    delete run.verifyPass;
+    return true;
   }
+  if (!run.verifyPass) beginVerifyPass(run, env);
+  const pass = run.verifyPass!;
   const started = Date.now();
-  run.stage = "processing";
-  run.currentStep = "verify";
+  const order = verifyOrder(run);
+  const limit = env.NEWS_RESEARCH_MAX_VERIFY;
+
+  if (!pass.stopReason && started > Date.parse(pass.startedAt) + TIME_LIMIT_MS)
+    pass.stopReason = `Time limit (${TIME_LIMIT_MS / 60_000} min) reached.`;
+  let batch = pass.stopReason
+    ? []
+    : order.filter((c) => PENDING.has(c.status)).slice(0, CONCURRENCY);
+  // Fewer than DRAFT_MIN stories meet the evidence bar: verify the next ones in the same order.
+  if (
+    batch.length === 0 &&
+    !pass.stopReason &&
+    pass.extra < MAX_EXTRA &&
+    run.candidates.filter(meetsEvidenceBar).length < DRAFT_MIN
+  ) {
+    batch = order
+      .slice(limit)
+      .filter((c) => c.status === "not_processed")
+      .slice(0, Math.min(CONCURRENCY, MAX_EXTRA - pass.extra));
+    pass.extra += batch.length;
+  }
+
+  if (batch.length === 0) {
+    for (const c of order)
+      if (PENDING.has(c.status))
+        markNotProcessed(c, `${pass.stopReason ?? "Stopped."} Not verified; retry to continue.`);
+    if (pass.stopReason)
+      warnOnce(run, `Verification stopped early: ${pass.stopReason} Use Retry to continue.`);
+    summarise(run);
+    run.timings.push({ stage: "verify", ms: Date.now() - Date.parse(pass.startedAt) });
+    delete run.verifyPass;
+    return true;
+  }
+
   const ctx: Ctx = {
     run,
     tavily: {
       apiKey: env.TAVILY_API_KEY,
-      spendCall: budget(run, "searchesUsed", MAX_TAVILY_CALLS, "Tavily"),
+      spendCall: budget(run, "searchesUsed", pass.searchesAtStart, MAX_TAVILY_CALLS, "Tavily"),
     },
     fast: {
       apiKey: env.GEMINI_API_KEY!,
       model: env.GEMINI_MODEL_FAST,
-      spendCall: budget(run, "aiCallsUsed", MAX_GEMINI_CALLS, "Gemini"),
+      spendCall: budget(run, "aiCallsUsed", pass.aiCallsAtStart, MAX_GEMINI_CALLS, "Gemini"),
     },
     reasoning: {
       apiKey: env.GEMINI_API_KEY!,
       model: env.GEMINI_MODEL_REASONING,
-      spendCall: budget(run, "aiCallsUsed", MAX_GEMINI_CALLS, "Gemini"),
+      spendCall: budget(run, "aiCallsUsed", pass.aiCallsAtStart, MAX_GEMINI_CALLS, "Gemini"),
     },
-    deadline: started + TIME_LIMIT_MS,
+    deadline: Date.parse(pass.startedAt) + TIME_LIMIT_MS,
     stopReason: null,
     searched: new Map(),
   };
-
-  // Verifiable (official-announcement) stories first, then by rank. Same order on retries.
-  const order = [...run.candidates].sort(
-    (a, b) => Number(b.verifiable === true) - Number(a.verifiable === true) || a.rank - b.rank,
-  );
-  const limit = env.NEWS_RESEARCH_MAX_VERIFY;
-  for (const c of order.slice(limit)) {
-    markNotProcessed(c, `Not in the top ${limit} verified per run (NEWS_RESEARCH_MAX_VERIFY).`);
-  }
-  const selected = order.slice(0, limit).filter((c) => !opts.retry || RETRYABLE.has(c.status));
-  for (const c of selected) {
-    c.status = "queued";
-    c.statusReason = "Waiting for verification.";
-  }
-
-  let begun = 0;
-  const verifyOne = async (c: CandidateReport) => {
-    if (!ctx.stopReason && Date.now() > ctx.deadline)
-      ctx.stopReason = `Time limit (${TIME_LIMIT_MS / 60_000} min) reached.`;
+  const done = run.candidates.filter((c) => FINISHED.has(c.status)).length;
+  run.stage = "processing";
+  run.currentStep = "verify";
+  run.stageDetail = `Verifying stories ${done + 1}–${done + batch.length}`;
+  await pool(batch, CONCURRENCY, async (c) => {
     if (ctx.stopReason)
       return markNotProcessed(c, `${ctx.stopReason} Not verified; retry to continue.`);
-    run.stageDetail = `Verifying story ${++begun}`;
     await verifyCandidate(c, ctx);
     summarise(run);
-    void saveRun(run); // finished stories survive a crash or refresh
-  };
-  await pool(selected, CONCURRENCY, verifyOne);
-
-  // Fewer than DRAFT_MIN stories meet the evidence bar: verify the next ones in the same order.
-  let next = limit;
-  while (
-    !ctx.stopReason &&
-    run.candidates.filter(meetsEvidenceBar).length < DRAFT_MIN &&
-    next < Math.min(order.length, limit + MAX_EXTRA)
-  ) {
-    const batch = order
-      .slice(next, Math.min(next + CONCURRENCY, limit + MAX_EXTRA))
-      .filter((c) => !FINISHED.has(c.status));
-    next += CONCURRENCY;
-    await pool(batch, CONCURRENCY, verifyOne);
-  }
-  if (ctx.stopReason)
-    warnOnce(run, `Verification stopped early: ${ctx.stopReason} Use Retry to continue.`);
+    void saveRun(run); // finished stories survive a cut-off step
+  });
+  pass.stopReason ??= ctx.stopReason;
   summarise(run);
-  run.timings.push({ stage: opts.retry ? "verify_retry" : "verify", ms: Date.now() - started });
+  return false;
 }
 
 /** Counts and the draft queue, from the candidates' current statuses. */

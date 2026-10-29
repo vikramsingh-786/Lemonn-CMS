@@ -19,10 +19,11 @@ import { ResearchFeed, ResearchPanel } from "./research-panel";
 import { ResearchProgress } from "./research-progress";
 import { VerificationReview } from "./verification-review";
 
-const POLL_INTERVAL_MS = 2_000;
-/** Client gives up polling after this long (verification stops starting new work at 12 min). */
-const MAX_POLL_MS = 20 * 60_000;
-const MAX_POLL_FAILURES = 3;
+/** Wait before asking again when another tab is running this run's step. */
+const BUSY_WAIT_MS = 3_000;
+/** The dashboard stops driving a run after this long (verification stops new work at 12 min). */
+const MAX_RUN_MS = 30 * 60_000;
+const MAX_STEP_FAILURES = 3;
 
 const INITIAL_SOURCES: ConfiguredSource[] = DEFAULT_SOURCES.map((s) => ({
   id: s.id,
@@ -41,7 +42,7 @@ async function readError(response: Response, fallback: string): Promise<string> 
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Research runs are saved on the server (.data/runs, local only); nothing is published or sent to lemonn.co.in. */
+/** Research runs are saved in the CMS database; nothing is published or sent to lemonn.co.in. */
 export function Dashboard() {
   const [sources, setSources] = useState<ConfiguredSource[]>(INITIAL_SOURCES);
   const [researchStatus, setResearchStatus] = useState<ResearchStatus>("idle");
@@ -87,22 +88,36 @@ export function Dashboard() {
     setSources((prev) => prev.map((s) => (s.id === id ? { ...s, enabled } : s)));
   }
 
-  /** Polls a run until it finishes; throws with a readable message on failure. */
+  /**
+   * Drives a run to the end: each POST /step does one bounded piece of work on the server and
+   * returns the saved snapshot. Closing the tab pauses the run; reopening ?run=<id> resumes it.
+   */
   async function follow(runId: string) {
     const startedAt = Date.now();
     let failures = 0;
     while (mounted.current) {
-      await sleep(POLL_INTERVAL_MS);
-      if (Date.now() - startedAt > MAX_POLL_MS) {
-        throw new Error("Research is taking too long. Check again later.");
+      if (Date.now() - startedAt > MAX_RUN_MS) {
+        throw new Error("Research is taking too long. Reopen this run later to continue.");
       }
-      const response = await fetch(`/api/research/${runId}`).catch(() => null);
+      const response = await fetch(`/api/research/${runId}/step`, { method: "POST" }).catch(
+        () => null,
+      );
+      if (response?.status === 409) {
+        // Another tab or request is working on this run: show its progress and wait.
+        await sleep(BUSY_WAIT_MS);
+        const snapshot = await fetch(`/api/research/${runId}`).catch(() => null);
+        if (snapshot?.ok && mounted.current) setRun((await snapshot.json()) as ResearchRun);
+        continue;
+      }
       if (!response?.ok) {
         if (response?.status === 404)
           throw new Error(await readError(response, "The run was lost."));
-        if (++failures >= MAX_POLL_FAILURES) {
-          throw new Error("Lost contact with the server while researching.");
+        if (++failures >= MAX_STEP_FAILURES) {
+          throw new Error(
+            "Lost contact with the server while researching. Reopen the run to continue.",
+          );
         }
+        await sleep(BUSY_WAIT_MS);
         continue;
       }
       failures = 0;

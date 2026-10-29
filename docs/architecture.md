@@ -8,8 +8,14 @@ admin review them, and publish approved articles to the Lemonn public website.
 ## Current state
 
 The dashboard and the full research pipeline exist as a prototype: discovery, ranking, claim
-verification and drafting. `POST /api/research` starts a background
-run in server memory and `GET /api/research/[runId]` returns its progress. Discovery reads
+verification and drafting. Runs live in PostgreSQL (`ResearchRun` table via Prisma,
+`run-store.ts`): the run snapshot in `data`, the official evidence passages for drafting in
+`evidence` (never returned by the API). `POST /api/research` only creates a run; the dashboard
+then calls `POST /api/research/[runId]/step` in a loop, and each call does one bounded piece of
+work and saves it (`pipeline.ts`): discover → rank → verify 3 stories per step → draft 2 per step
+→ completed. A per-run lock in the database (`stepLockUntil`) lets one request work on a run at a
+time; a cut-off step is repeated by the next one. This fits serverless limits (Vercel: 300 s per
+request). Closing the tab pauses a run; reopening `?run=<id>` resumes it. Discovery reads
 publishers' Google News sitemaps (config in `src/features/research/sitemaps.ts`) or, for sources
 without one, searches Tavily. It keeps stories from the last 24 hours on 7 topics
 (`src/features/research/topics.ts`), at most 200 per source. Publisher fetches go through
@@ -26,13 +32,13 @@ AI. Verified stories are queued for drafting by an evidence score (`draft-score.
 down the ranking (up to 8 extra stories). Every other partially verified story is queued too:
 its draft states verified claims as fact and attributes partially verified ones ("according to
 media reports"), lists them for the author, and is never marked ready for review. Step 6 (`draft.ts`) has Gemini write an original article from verified claims
-and their official evidence only, then runs deterministic checks (`draft-checks.ts`). Runs are
-saved as local JSON in `.data/runs/` (`run-store.ts`, gitignored) so a refresh or restart keeps
-results; `POST /api/research/[runId]/verify` and `/draft` retry only failed or unfinished stories.
+and their official evidence only, then runs deterministic checks (`draft-checks.ts`).
+`POST /api/research/[runId]/verify` and `/draft` prepare a retry of only failed or unfinished
+stories; the step loop then runs it.
 The source list is fixed in `src/features/dashboard/data.ts` (on/off per browser tab).
 
-Not built yet: database models, auth, job queue and worker (runs execute in the web process,
-one at a time), source management, draft editing/approval, publishing and the audit log.
+Not built yet: auth, a background worker (runs advance only while the dashboard is open),
+source management, draft editing/approval, publishing and the audit log.
 
 ## System boundaries
 

@@ -20,7 +20,8 @@
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev"
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.1",

@@ -1,29 +1,26 @@
-import { after } from "next/server";
-import { startDraftRetry } from "@/features/research/discovery";
+import { prepareDraftRetry } from "@/features/research/pipeline";
+import { getRun, saveRun } from "@/features/research/run-store";
 import type { ApiErrorBody, StartRunResponse } from "@/features/research/types";
-import { serverEnv } from "@/lib/env";
 
 /**
  * (Re)draft queued stories of an existing run that have no draft or whose drafting failed (same
- * Run ID). Discovery, ranking and verification are not repeated. Poll GET /api/research/[runId].
+ * Run ID). Discovery, ranking and verification are not repeated.
+ * Prepares the run; the dashboard then drives it with POST /api/research/[runId]/step.
  */
 export async function POST(_request: Request, ctx: RouteContext<"/api/research/[runId]/draft">) {
   const { runId } = await ctx.params;
-  const started = await startDraftRetry(runId, serverEnv());
-  if (!started.ok) {
+  const run = await getRun(runId);
+  const blocked = run ? prepareDraftRetry(run) : "Research run not found.";
+  if (!run || blocked) {
     const body: ApiErrorBody = {
-      error: {
-        code: started.status === 404 ? "not_found" : "busy",
-        message: started.message,
-        retryable: started.status === 409,
-      },
+      error: { code: run ? "busy" : "not_found", message: blocked!, retryable: false },
     };
     return Response.json(body, {
-      status: started.status,
+      status: run ? 409 : 404,
       headers: { "Cache-Control": "no-store" },
     });
   }
-  after(started.work);
+  await saveRun(run);
   const body: StartRunResponse = { runId };
   return Response.json(body, { status: 202, headers: { "Cache-Control": "no-store" } });
 }

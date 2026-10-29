@@ -1,16 +1,12 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { sourceDomain, type NewsSource } from "@/features/dashboard/data";
+import { DEFAULT_SOURCES, sourceDomain, type NewsSource } from "@/features/dashboard/data";
 import { pool } from "@/lib/pool";
 import { FetchError, isWithinDomain } from "@/lib/safe-fetch";
 import type { ServerEnv } from "@/lib/env";
-import { draftRun } from "./draft";
-import { rankRun } from "./rank";
-import { addRun, claimActive, getRun, releaseActive, saveRun } from "./run-store";
 import { NEWS_SITEMAPS, readNewsSitemaps, type RawItem } from "./sitemaps";
 import { searchTavily } from "./tavily";
 import { TOPICS, classifyTopics } from "./topics";
-import { verifyRun } from "./verify";
 import {
   DRAFT_TARGET,
   type DiscoveredItem,
@@ -29,17 +25,12 @@ export function needsTavily(source: NewsSource): boolean {
   return !NEWS_SITEMAPS[source.id];
 }
 
-/** Registers a run and returns it plus the work to run in the background; null when busy. */
-export function startRun(
-  sources: readonly NewsSource[],
-  window: ResearchRun["window"],
-  env: ServerEnv,
-): { runId: string; work: () => Promise<void> } | null {
-  const tavilyKey = env.TAVILY_API_KEY;
+/** A new run for `sources` over `window`; nothing runs until its first step. */
+export function newRun(sources: readonly NewsSource[], window: ResearchRun["window"]): ResearchRun {
   const runId = randomUUID();
-  if (!claimActive(runId)) return null;
   const run: ResearchRun = {
     runId,
+    sourceIds: sources.map((s) => s.id),
     window,
     stage: "discovering",
     currentStep: "discover",
@@ -77,86 +68,27 @@ export function startRun(
     shortfallReasons: [],
     error: null,
   };
-  addRun(run);
-
-  const work = async () => {
-    const started = Date.now();
-    try {
-      let done = 0;
-      await pool(sources, CONCURRENCY, async (source) => {
-        await discoverSource(run, source, tavilyKey);
-        run.stageDetail = `Discovering: ${++done} of ${sources.length} sources done`;
-      });
-      run.items.sort(newestFirst);
-      run.timings.push({ stage: "discovery_total", ms: Date.now() - started });
-      if (run.coverage.every((c) => c.status === "failed")) {
-        run.stage = "failed";
-        run.error = { code: "provider_unavailable", message: "Every enabled source failed." };
-        run.stageDetail = "Discovery failed for every source";
-        return;
-      }
-      void saveRun(run);
-      await rankRun(run, { apiKey: env.GEMINI_API_KEY, model: env.GEMINI_MODEL_FAST });
-      void saveRun(run);
-      await verifyRun(run, env);
-      void saveRun(run);
-      await draftRun(run, env);
-      completeRun(run);
-    } catch {
-      run.stage = "failed";
-      run.error = { code: "internal_error", message: "Research failed unexpectedly." };
-    } finally {
-      run.currentStep = null;
-      run.finishedAt = new Date().toISOString();
-      releaseActive(run.runId);
-      await saveRun(run);
-    }
-  };
-  return { runId: run.runId, work };
+  return run;
 }
 
-function completeRun(run: ResearchRun) {
-  run.stage = "completed";
-  run.error = null;
-  run.stageDetail =
-    run.counts.processed > 0
-      ? `Verified ${run.counts.verified} of ${run.counts.processed} checked stories; ${run.drafts.length} of ${run.draftQueue.length} queued stories drafted`
-      : `Ranked ${run.candidates.length} candidate${run.candidates.length === 1 ? "" : "s"} from ${run.items.length} discovered stor${run.items.length === 1 ? "y" : "ies"}`;
-}
-
-export type RetryStart =
-  { ok: true; work: () => Promise<void> } | { ok: false; status: 404 | 409; message: string };
-
-/**
- * Re-verifies only the failed / not-processed stories of an existing run (same Run ID).
- * Discovery and ranking are not repeated; finished stories are left as they are.
- */
-export async function startVerificationRetry(runId: string, env: ServerEnv): Promise<RetryStart> {
-  const run = await getRun(runId);
-  if (!run) return { ok: false, status: 404, message: "Research run not found." };
-  if (run.candidates.length === 0)
-    return { ok: false, status: 409, message: "This run has no ranked stories to verify." };
-  if (!claimActive(runId))
-    return { ok: false, status: 409, message: "A research run is already in progress." };
-  run.stage = "processing";
-  run.error = null;
-  run.finishedAt = null;
-  const work = async () => {
-    try {
-      await verifyRun(run, env, { retry: true });
-      await draftRun(run, env); // drafts only newly queued stories
-      completeRun(run);
-    } catch {
-      run.stage = "failed";
-      run.error = { code: "internal_error", message: "Verification retry failed unexpectedly." };
-    } finally {
-      run.currentStep = null;
-      run.finishedAt = new Date().toISOString();
-      releaseActive(runId);
-      await saveRun(run);
-    }
-  };
-  return { ok: true, work };
+/** Step 3 on a run: every chosen source, 3 at a time; the run fails only if every source failed. */
+export async function discoverStep(run: ResearchRun, env: ServerEnv): Promise<void> {
+  const started = Date.now();
+  const sources = DEFAULT_SOURCES.filter((s) => run.sourceIds.includes(s.id));
+  let done = 0;
+  await pool(sources, CONCURRENCY, async (source) => {
+    await discoverSource(run, source, env.TAVILY_API_KEY);
+    run.stageDetail = `Discovering: ${++done} of ${sources.length} sources done`;
+  });
+  run.items.sort(newestFirst);
+  run.timings.push({ stage: "discovery_total", ms: Date.now() - started });
+  if (run.coverage.every((c) => c.status === "failed")) {
+    run.stage = "failed";
+    run.error = { code: "provider_unavailable", message: "Every enabled source failed." };
+    run.stageDetail = "Discovery failed for every source";
+    return;
+  }
+  run.stage = "ranking";
 }
 
 function newestFirst(a: { publishedAt: string | null }, b: { publishedAt: string | null }) {
@@ -264,38 +196,4 @@ async function discoverSource(run: ResearchRun, source: NewsSource, tavilyKey: s
     run.coverage.push(coverage); // only finished sources appear in coverage
     run.timings.push({ stage: source.name, ms: Date.now() - started });
   }
-}
-
-/**
- * (Re)drafts draft-queue stories that have no draft yet or whose drafting failed (same Run ID).
- * Discovery, ranking and verification are not repeated.
- */
-export async function startDraftRetry(runId: string, env: ServerEnv): Promise<RetryStart> {
-  const run = await getRun(runId);
-  if (!run) return { ok: false, status: 404, message: "Research run not found." };
-  const pending = run.draftQueue.filter(
-    (q) => !run.drafts.some((d) => d.candidateId === q.candidateId),
-  );
-  if (pending.length === 0)
-    return { ok: false, status: 409, message: "Every queued story already has a draft." };
-  if (!claimActive(runId))
-    return { ok: false, status: 409, message: "A research run is already in progress." };
-  run.stage = "drafting";
-  run.error = null;
-  run.finishedAt = null;
-  const work = async () => {
-    try {
-      await draftRun(run, env);
-      completeRun(run);
-    } catch {
-      run.stage = "failed";
-      run.error = { code: "internal_error", message: "Drafting failed unexpectedly." };
-    } finally {
-      run.currentStep = null;
-      run.finishedAt = new Date().toISOString();
-      releaseActive(runId);
-      await saveRun(run);
-    }
-  };
-  return { ok: true, work };
 }
