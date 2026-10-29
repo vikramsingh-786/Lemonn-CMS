@@ -72,8 +72,8 @@ export function DiscoveredStories({ run }: { run: ResearchRun }) {
           </h2>
           <p className="mt-1.5 text-sm text-muted-foreground">
             {isRanked
-              ? "Ranked by score, highest first, after merging duplicates and removing non-articles. Not verified yet."
-              : "Last 24 hours, newest first, max 20 per source. Ranking starts when discovery finishes."}
+              ? "Ranked by score, highest first, after merging duplicates and removing non-articles; each publisher's top 20. Not verified yet."
+              : "Last 24 hours, newest first, max 200 per source. Ranking starts when discovery finishes."}
           </p>
         </div>
         {stories.length > 0 && (
@@ -93,7 +93,7 @@ export function DiscoveredStories({ run }: { run: ResearchRun }) {
 
       {stories.length === 0 ? (
         <p className="px-5 py-8 text-center text-sm text-muted-foreground sm:px-6">
-          No stories on the 8 topics yet.
+          No stories on the 7 topics yet.
         </p>
       ) : (
         <div className="p-4 sm:p-5">

@@ -9,11 +9,22 @@ export const RANK_CONFIG = {
   /** Jaccard similarity of meaningful headline words needed to merge. */
   duplicateJaccard: 0.6,
 
+  /*
+   * Score weights follow the editorial priority, highest max first:
+   * announcement (6) > topic (5) > source (4) > coverage (3) > recency (2).
+   * Higher signals usually win, but several lower ones together can beat a weak announcement.
+   * Penalties are sized to cancel what they guard against, and any penalty also withholds the
+   * announcement bonus (a preview or tip about results is not the announcement itself).
+   */
+
+  /** Each lead publisher keeps only its best this-many candidates by rules score. */
+  perSourceCap: 20,
+
   /** [max age in hours, points], first match wins. */
   recency: [
-    [6, 3],
-    [12, 2],
-    [24, 1],
+    [6, 2],
+    [12, 1],
+    [24, 0],
   ] as const,
 
   coveragePerPublisher: 1,
@@ -30,50 +41,49 @@ export const RANK_CONFIG = {
     "bloomberg-markets",
     "fe-markets",
   ],
-  majorPoints: 2,
-  otherPoints: 1,
+  majorPoints: 4,
+  otherPoints: 2,
 
   /** Points for the best topic a candidate has (topic names from topics.ts). */
   topicPoints: {
-    "Company announcements": 2,
-    "Regulatory news": 2,
-    IPOs: 2,
-    "Market-moving news": 1,
-    "Macro and global markets": 1,
-    "F&O and derivatives": 1,
-    "Funds and investments": 1,
+    "Company announcements": 5,
+    "Regulatory news": 5,
+    "Market-moving news": 3,
+    "Macro and global markets": 3,
+    "F&O and derivatives": 3,
+    "Funds and investments": 3,
     "Trading education": 0,
   } as Record<string, number>,
 
   /** Headline signals of an official, verifiable announcement. */
   announcement: {
-    points: 2,
+    points: 6,
     pattern:
-      /\bQ[1-4]\s*(?:FY\s?\d{2,4}\s*)?results?\b|\bnet profit\b|\bdividends?\b|\bbonus\b|\bbuy-?backs?\b|\bbags?\b.*\border|\bboard approves\b|\bappoints?\b|\bresigns?\b|\bU?DRHP\b|\bSEBI\b|\bRBI\b|\bcircular\b|\bpenalty\b|\brepo rate\b/i,
+      /\bQ[1-4]\s*(?:FY\s?\d{2,4}\s*)?(?:results?|earnings|revenue|net (?:profit|loss)|profit|loss)\b|\b(?:March|June|September|December)[- ]quarter\b|\bnet (?:profit|loss)\b|\bprofit (?:rises?|jumps?|falls?|declines?|drops?|surges?|grows?|doubles)\b|\bdividends?\b|\bbonus\b|\bbuy-?backs?\b|\bstock split\b|\brights issue\b|\brecord date\b|\b(?:bags?|wins?|secures?)\b.{0,40}\border|\border worth\b|\bacquires?\b|\b(?:buys?|sells?|acquires?|picks up)\b.{0,40}\bstake\b|\bboard approves\b|\bappoints?\b|\bresigns?\b|\bU?DRHP\b|\bSEBI\b|\bRBI\b|\bcircular\b|\bpenalty\b|\brepo rate\b/i,
   },
 
   /** Headline noise; each category counts once. `path` patterns test the URL path. */
   noise: [
     {
       label: "tips",
-      points: -3,
+      points: -6,
       pattern:
-        /\bstocks? to buy\b|\bbuy or sell\b|\btarget price\b|\b\d+(?:\.\d+)?% upside\b|\bupside (?:potential|target)\b|\btop picks\b|\bmultibaggers?\b/i,
+        /\bstocks? to buy\b|\bbuy or sell\b|\btarget prices?\b|\b\d+(?:\.\d+)?% upside\b|\bupside (?:potential|target)\b|\btop picks\b|\bmultibaggers?\b/i,
     },
     {
       label: "explainer",
-      points: -3,
+      points: -5,
       pattern: /\bexplained\b|\bwhat is\b|\bhow to\b|\bwho is\b|\svs\.?\s/i,
     },
-    { label: "question headline", points: -3, pattern: /\?\s*$/ },
+    { label: "question headline", points: -4, pattern: /\?\s*$/ },
     {
       label: "live/preview",
-      points: -2,
-      pattern: /\blive updates?\b|\bwhat to watch\b|\bthings to know\b/i,
+      points: -3,
+      pattern: /\blive updates?\b|\bpreviews?\b|\bwhat to watch\b|\bthings to know\b/i,
     },
     {
       label: "opinion/interview",
-      points: -2,
+      points: -3,
       // Quote-led headline, or "…, says First Last" / "First Last says". Not ": First Last" at the
       // end: Bloomberg's Title Case ("…: Markets Wrap") matched it. ("upside" alone matched
       // "Upside Inflation Risks", so tips need "N% upside".)

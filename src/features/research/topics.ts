@@ -1,7 +1,7 @@
 import "server-only";
 
 /**
- * The 8 topics the CMS covers. A story is kept only if its title or keywords match at least one
+ * The 7 topics the CMS covers. A story is kept only if its title or keywords match at least one
  * keyword (case-insensitive, whole words/phrases; a trailing "s"/"es" also matches).
  * Editors: tune the keyword lists here.
  */
@@ -82,21 +82,6 @@ export const TOPICS: readonly { name: string; keywords: readonly string[] }[] = 
       "CCI",
       "NCLT",
       "tax rule",
-    ],
-  },
-  {
-    name: "IPOs",
-    keywords: [
-      "IPO",
-      "listing",
-      "GMP",
-      "grey market premium",
-      "subscription status",
-      "anchor investor",
-      "DRHP",
-      "RHP",
-      "allotment",
-      "SME IPO",
     ],
   },
   {

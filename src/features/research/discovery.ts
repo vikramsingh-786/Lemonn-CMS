@@ -19,7 +19,8 @@ import {
   type SourceCoverage,
 } from "./types";
 
-const MAX_PER_SOURCE = 20;
+// Safety cap only: covers a full 24h for the busiest source (~165 on-topic/day, Oct 2026).
+const MAX_PER_SOURCE = 200;
 const CONCURRENCY = 3;
 const MAX_TAVILY_CALLS = 20;
 
