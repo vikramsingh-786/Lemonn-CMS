@@ -112,8 +112,14 @@ function datePatterns(figure: string): string[] | null {
  *   (₹1,377 crore = 13,770 million = 1,37,700 lakh), or the bare number when the text states the
  *   unit elsewhere (filing tables say "Rs. in crore" once in the header).
  * - Anything else: every number present (commas ignored), or the words case-insensitively.
+ * `siblings`: the claim's other figures. A percent change missing from the text still counts when
+ * it computes from one of the claim's amounts and a comparison value next to it (see below).
  */
-export function checkFigure(figure: string, text: string): FigureCheck {
+export function checkFigure(
+  figure: string,
+  text: string,
+  siblings: readonly string[] = [],
+): FigureCheck {
   const dates = datePatterns(figure);
   if (dates) {
     return dates.some((p) => has(text, p))
@@ -141,7 +147,7 @@ export function checkFigure(figure: string, text: string): FigureCheck {
       continue;
     }
     if (isPercent && last) {
-      if (!has(text, `${num}\\s*(?:%|per\\s?cent(?!age))`))
+      if (!has(text, `${num}\\s*(?:%|per\\s?cent(?!age))`) && !derivedPercent(raw, siblings, text))
         return { found: false, note: `"${raw}%" not found` };
       continue;
     }
@@ -155,6 +161,39 @@ export function checkFigure(figure: string, text: string): FigureCheck {
     if (!has(text, num)) return { found: false, note: `"${raw}" not found` };
   }
   return { found: true, note: "" };
+}
+
+/** Characters around an amount in which its comparison value must appear (same table row). */
+const ROW_CHARS = 250;
+
+/**
+ * Reporters often state a change the filing does not print ("profit up 126%"). It counts only when
+ * one of the claim's amounts appears in the text and a number within ROW_CHARS of it gives exactly
+ * that change, to the claim's rounding. Kept local so a 600k-character filing can't match by chance.
+ */
+function derivedPercent(raw: string, siblings: readonly string[], text: string): boolean {
+  const p = Number(raw.replace(/,/g, ""));
+  const decimals = raw.split(".")[1]?.length ?? 0;
+  const tolerance = 0.5 / 10 ** decimals;
+  for (const sibling of siblings) {
+    const unit = unitOf(sibling);
+    const amount = sibling.match(/\d[\d,]*(?:\.\d+)?/)?.[0];
+    if (!unit || !amount) continue;
+    const inCrore = Number(amount.replace(/,/g, "")) * UNIT_IN_CRORE[unit]!;
+    for (const factor of Object.values(UNIT_IN_CRORE)) {
+      const value = Number(plain(inCrore / factor));
+      for (const m of text.matchAll(new RegExp(numberPattern(plain(value)), "giu"))) {
+        const row = text.slice(Math.max(0, m.index - ROW_CHARS), m.index + m[0].length + ROW_CHARS);
+        for (const n of row.match(/\d[\d,]*(?:\.\d+)?/g) ?? []) {
+          const base = Number(n.replace(/,/g, ""));
+          if (!(base > 0) || base === value) continue;
+          const change = Math.abs(value / base - 1) * 100;
+          if (Math.abs(change - p) <= tolerance) return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 function amountFound(raw: string, unit: string, text: string): boolean {
@@ -195,15 +234,26 @@ export function stageSupported(stage: string, text: string): FigureCheck {
 }
 
 /** Year-month a URL path or date string points to, e.g. ".../nov-2018/..." → 2018-11. */
-export function dateHint(url: string, publishedAt: string | null): Date | null {
+export function dateHint(url: string, publishedAt: string | null, text = ""): Date | null {
   if (publishedAt) {
     const d = new Date(publishedAt);
     if (!Number.isNaN(d.getTime())) return d;
   }
+  const monthIndex = (name: string) => MONTHS.findIndex((x) => name.startsWith(x.slice(0, 3)));
   const m = url.toLowerCase().match(new RegExp(`/(${MONTH_RE})-(20\\d{2})/`));
-  if (m) {
-    const month = MONTHS.findIndex((x) => m[1]!.startsWith(x.slice(0, 3)));
-    return new Date(Date.UTC(Number(m[2]), month, 1));
-  }
+  if (m) return new Date(Date.UTC(Number(m[2]), monthIndex(m[1]!), 1));
+  // NSE filing names carry the filing time: SYMBOL_DDMMYYYYhhmmss_….pdf
+  const nse = url.match(/_(\d{2})(\d{2})(20\d{2})\d{6}_/);
+  if (nse) return new Date(Date.UTC(Number(nse[3]), Number(nse[2]) - 1, Number(nse[1])));
+  // A filing's letter date in its opening lines: "7th November 2025" or "November 7, 2025".
+  const head = text.slice(0, 600).toLowerCase();
+  const dmy = head.match(
+    new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTH_RE})\\.?,?\\s+(20\\d{2})\\b`),
+  );
+  if (dmy) return new Date(Date.UTC(Number(dmy[3]), monthIndex(dmy[2]!), Number(dmy[1])));
+  const mdy = head.match(
+    new RegExp(`\\b(${MONTH_RE})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(20\\d{2})\\b`),
+  );
+  if (mdy) return new Date(Date.UTC(Number(mdy[3]), monthIndex(mdy[1]!), Number(mdy[2])));
   return null;
 }

@@ -285,6 +285,8 @@ export type ResearchRun = {
   warnings: string[];
   /** Provider failures by category, e.g. { "gemini:timeout": 2 }. */
   errorCounts: Record<string, number>;
+  /** First failed page fetches as "reason: URL" (public URLs only; absent in older runs). */
+  fetchFailures?: string[];
   timings: { stage: string; ms: number }[];
   /** Why fewer than DRAFT_TARGET drafts were produced (empty when the target was met). */
   shortfallReasons: string[];

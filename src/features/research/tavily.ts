@@ -105,13 +105,19 @@ export function searchTavily(domain: string, access: TavilyAccess): Promise<RawI
   );
 }
 
-/** Verification: general search restricted to official `domains`, no time limit. */
+/** Verification: general search restricted to official `domains`, optionally to recent pages. */
 export function searchOfficial(
   {
     query,
     domains,
     maxResults = 5,
-  }: { query: string; domains: readonly string[]; maxResults?: number },
+    timeRange,
+  }: {
+    query: string;
+    domains: readonly string[];
+    maxResults?: number;
+    timeRange?: "week" | "month" | "year";
+  },
   access: TavilyAccess,
 ): Promise<RawItem[]> {
   return tavilySearch(
@@ -121,6 +127,7 @@ export function searchOfficial(
       search_depth: "basic",
       max_results: maxResults,
       include_domains: domains,
+      ...(timeRange && { time_range: timeRange }),
     },
     access,
   );
