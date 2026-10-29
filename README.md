@@ -56,6 +56,8 @@ See [.env.example](.env.example). All variables are server-only; never prefix se
 | `GEMINI_MODEL_FAST`        | Optional                               | Default `gemini-3.5-flash-lite`                    |
 | `GEMINI_MODEL_REASONING`   | Optional                               | Default `gemini-3.8-flash`                         |
 | `NEWS_RESEARCH_MAX_VERIFY` | Optional                               | Stories verified per run, 1–20 (default 12)        |
+| `ADMIN_PASSWORD`           | Sign-in                                | The password asked on `/login`                     |
+| `AUTH_SECRET`              | Sign-in                                | ≥ 32 random characters; signs the session cookie   |
 
 ## Adding shadcn/ui components
 

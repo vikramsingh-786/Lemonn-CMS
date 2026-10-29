@@ -1,4 +1,5 @@
 import { runStep } from "@/features/research/pipeline";
+import { requireApiSession } from "@/lib/session";
 import { claimStep, getRun, isRunId, releaseStep, saveRun } from "@/features/research/run-store";
 import type { ApiErrorBody } from "@/features/research/types";
 import { serverEnv } from "@/lib/env";
@@ -23,6 +24,8 @@ function error(
  * this in a loop until the run is completed or failed. 409 while another request holds the run.
  */
 export async function POST(_request: Request, ctx: RouteContext<"/api/research/[runId]/step">) {
+  const denied = await requireApiSession();
+  if (denied) return denied;
   const { runId } = await ctx.params;
   if (!isRunId(runId)) return error(404, "not_found", "Research run not found.");
   if (!(await claimStep(runId, LOCK_MS)))

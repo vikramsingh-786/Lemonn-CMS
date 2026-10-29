@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { UserRound } from "lucide-react";
+import { LogOut } from "lucide-react";
+import { logout } from "@/app/login/actions";
 import { BrandMark } from "@/components/layout/brand";
 import { NAV_ITEMS } from "@/components/layout/nav";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
@@ -55,14 +56,16 @@ export function Header() {
           Prototype
         </span>
         <ThemeToggle />
-        <span
-          role="img"
-          aria-label="Admin profile (sign-in not configured yet)"
-          title="Sign-in not configured yet"
-          className="pill-raised grid size-11 shrink-0 place-items-center rounded-full bg-card text-muted-foreground"
-        >
-          <UserRound className="size-5" aria-hidden />
-        </span>
+        <form action={logout}>
+          <button
+            type="submit"
+            aria-label="Sign out"
+            title="Sign out"
+            className="pill-raised grid size-11 shrink-0 place-items-center rounded-full bg-card text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            <LogOut className="size-5" aria-hidden />
+          </button>
+        </form>
       </div>
     </header>
   );

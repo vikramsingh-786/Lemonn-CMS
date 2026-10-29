@@ -319,7 +319,8 @@ export type ResearchErrorCode =
   | "provider_timeout"
   | "provider_unavailable"
   | "ai_invalid_output"
-  | "internal_error";
+  | "internal_error"
+  | "unauthorized";
 
 export type ApiErrorBody = {
   error: {

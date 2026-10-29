@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requireApiSession } from "@/lib/session";
 import { DEFAULT_SOURCES } from "@/features/dashboard/data";
 import { needsTavily, newRun } from "@/features/research/discovery";
 import { activeRunId, createRun } from "@/features/research/run-store";
@@ -32,6 +33,8 @@ function error(
 
 /** Validate the request and create the run; the dashboard then drives it with /step requests. */
 export async function POST(request: Request) {
+  const denied = await requireApiSession();
+  if (denied) return denied;
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return error(400, "invalid_request", "Invalid research request.");
 
