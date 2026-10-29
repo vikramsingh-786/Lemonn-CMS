@@ -381,6 +381,15 @@ export type DraftInput = {
     figures: string[];
     evidence: { organisation: string; url: string; passage: string }[];
   }[];
+  /** Only partly confirmed (news reports, a snippet, a missing figure): attribute, never assert. */
+  partiallyVerifiedClaims: {
+    id: string;
+    claim: string;
+    authority: string;
+    figures: string[];
+    whyPartial: string;
+    evidence: { organisation: string; url: string; passage: string }[];
+  }[];
   unconfirmed: string[];
   originalReport: { publisher: string; url: string; publishedAt: string | null };
 };
@@ -399,11 +408,13 @@ export type DraftOutput = z.infer<typeof draftOutput>;
 
 const DRAFT_PROMPT = `You write original news articles for Lemonn, an Indian stock-broking app, for Indian retail investors.
 
-The user message is JSON: {verifiedClaims:[{id, claim, authority, figures, evidence:[{organisation, url, passage}]}], unconfirmed:[...], originalReport:{publisher, url, publishedAt}}.
+The user message is JSON: {verifiedClaims:[{id, claim, authority, figures, evidence:[{organisation, url, passage}]}], partiallyVerifiedClaims:[{id, claim, authority, figures, whyPartial, evidence:[...]}], unconfirmed:[...], originalReport:{publisher, url, publishedAt}}.
 ${UNTRUSTED}
 
 Rules:
 - State as fact ONLY what the verified claims and their evidence passages say. Never add figures, dates, names, quotes, events, causes or forecasts.
+- Items in "partiallyVerifiedClaims" are only partly confirmed (see whyPartial). Include them only with clear attribution such as "according to media reports" or "X reportedly", never as confirmed or official fact, and never attribute them to an official source. Use only their own claim text, figures and evidence passages.
+- If there are no verifiedClaims, the headline must be attributed (for example ending with ": report").
 - Items in "unconfirmed" are NOT verified: leave them out, or say plainly that they are "not yet confirmed". Never state them as fact.
 - Attribute every fact to its official source, e.g. "according to the company's filing with BSE" or "SEBI said in a circular".
 - Write in your own words. Never copy sentences from the evidence passages or from any publisher.
@@ -418,9 +429,9 @@ Return JSON:
 - seoDescription: at most 155 characters
 - category: one of ${CATEGORIES.join(", ")}
 - tags: 2-5 short tags
-- claimIdsUsed: the ids of the verified claims you relied on (e.g. ["K1","K2"])`;
+- claimIdsUsed: the ids of the verified (K…) and partially verified (P…) claims you relied on (e.g. ["K1","P1"])`;
 
-/** One original article from verified claims only (reasoning model, temperature 0.3). */
+/** One original article: verified claims as fact, partially verified ones attributed (reasoning model). */
 export async function draftArticle(input: DraftInput, access: GeminiAccess): Promise<DraftOutput> {
   return geminiJson({
     access,

@@ -3,6 +3,7 @@ import type { ServerEnv } from "@/lib/env";
 import { pool } from "@/lib/pool";
 import { FetchError } from "@/lib/safe-fetch";
 import { runDraftChecks } from "./draft-checks";
+import { PARTIAL_REASON } from "./draft-score";
 import { relevantExcerpt } from "./extract";
 import { draftArticle, type DraftInput, type GeminiAccess } from "./gemini";
 import { loadEvidence, saveRun, type EvidencePassage } from "./run-store";
@@ -10,7 +11,9 @@ import {
   DRAFT_MIN,
   DRAFT_TARGET,
   type CandidateReport,
+  type ClaimAssessment,
   type DraftQueueItem,
+  type EvidenceRecord,
   type ResearchDraft,
   type ResearchRun,
 } from "./types";
@@ -116,20 +119,18 @@ function updateShortfall(run: ResearchRun) {
     return;
   }
   if (run.draftQueue.length < DRAFT_TARGET) {
-    const filled = run.draftQueue.filter((q) =>
-      q.reason.startsWith("Below the evidence bar"),
-    ).length;
-    const met = run.draftQueue.length - filled;
+    const partial = run.draftQueue.filter((q) => q.reason === PARTIAL_REASON).length;
+    const met = run.draftQueue.length - partial;
     reasons.push(
       `Only ${met} ${met === 1 ? "story" : "stories"} met the evidence bar for drafting (verified, or every high-materiality claim verified).`,
     );
-    if (filled > 0)
+    if (partial > 0)
       reasons.push(
-        `${filled} more ${filled === 1 ? "story was" : "stories were"} added to reach ${DRAFT_MIN}, drafted from verified claims only (needs recheck).`,
+        `${partial} partially verified ${partial === 1 ? "story was" : "stories were"} also drafted for the author to review before publishing.`,
       );
     if (run.draftQueue.length < DRAFT_MIN)
       reasons.push(
-        `Fewer than ${DRAFT_MIN} checked stories had any verified claim, so no more could be drafted without unverified facts.`,
+        `Fewer than ${DRAFT_MIN} checked stories were verified or partially verified; unverified and conflicting stories are never drafted.`,
       );
   }
   const failed = run.draftQueue.filter((q) => q.draftError);
@@ -157,40 +158,56 @@ async function draftOne(
   access: GeminiAccess,
 ): Promise<ResearchDraft | string> {
   const verified = c.claims.filter((a) => a.status === "verified");
-  if (verified.length === 0) return "Not drafted: the story has no verified claims.";
+  const partial = c.claims.filter(
+    (a) => a.materiality !== "low" && a.status === "partially_verified",
+  );
+  if (verified.length === 0 && partial.length === 0)
+    return "Not drafted: the story has no verified or partially verified claims.";
   const evidence = new Map(c.evidence.map((e) => [e.id, e]));
-
-  const claims = verified.map((a, i) => {
-    const supporting = a.links
+  const supportOf = (a: ClaimAssessment) =>
+    a.links
       .filter((l) => l.relation === "supports")
       .map((l) => evidence.get(l.evidenceId))
       .filter((e) => e !== undefined);
-    const official = supporting.filter((e) => e.kind === "primary" && e.retrieval === "page");
-    const texts = official
-      .filter((e) => passages[e.id])
-      .slice(0, PASSAGES_PER_CLAIM)
-      .map((e) => ({
-        organisation: e.organisation,
-        url: e.url,
-        passage: relevantExcerpt(
+  // Saved passage around the claim, else the record's own excerpt or title (snippets, news).
+  const passageFor = (a: ClaimAssessment, e: EvidenceRecord) =>
+    passages[e.id]
+      ? relevantExcerpt(
           passages[e.id]!.text,
           [{ text: a.claim, figures: a.figures }],
           PASSAGE_CHARS,
-        ),
-      }));
+        )
+      : e.excerpt || e.title;
+  const describe = (a: ClaimAssessment, kId: string, texts: readonly EvidenceRecord[]) => {
+    const supporting = supportOf(a);
     return {
-      kId: `K${i + 1}`,
+      kId,
       assessment: a,
-      official,
+      official: supporting.filter((e) => e.kind === "primary" && e.retrieval === "page"),
       secondary: supporting.filter((e) => e.kind === "secondary"),
-      texts,
+      texts: texts
+        .slice(0, PASSAGES_PER_CLAIM)
+        .map((e) => ({ organisation: e.organisation, url: e.url, passage: passageFor(a, e) }))
+        .filter((t) => t.passage),
     };
-  });
-  if (claims.every((k) => k.texts.length === 0)) return `Not drafted: ${NO_EVIDENCE_TEXT}.`;
+  };
+  const claims = verified.map((a, i) =>
+    describe(
+      a,
+      `K${i + 1}`,
+      supportOf(a).filter((e) => e.kind === "primary" && e.retrieval === "page" && passages[e.id]),
+    ),
+  );
+  const partialClaims = partial.map((a, i) => describe(a, `P${i + 1}`, supportOf(a)));
+  const all = [...claims, ...partialClaims];
+  if (all.every((k) => k.texts.length === 0)) return `Not drafted: ${NO_EVIDENCE_TEXT}.`;
 
   const unconfirmed = [
     ...c.claims
-      .filter((a) => a.materiality !== "low" && a.status !== "verified")
+      .filter(
+        (a) =>
+          a.materiality !== "low" && a.status !== "verified" && a.status !== "partially_verified",
+      )
       .map((a) => a.claim),
     ...verified.map((a) => a.gaps.trim()).filter(Boolean),
   ];
@@ -202,23 +219,33 @@ async function draftOne(
       figures: k.assessment.figures,
       evidence: k.texts,
     })),
+    partiallyVerifiedClaims: partialClaims.map((k) => ({
+      id: k.kId,
+      claim: k.assessment.claim,
+      authority: k.assessment.authority,
+      figures: k.assessment.figures,
+      whyPartial: k.assessment.explanation,
+      evidence: k.texts,
+    })),
     unconfirmed,
     originalReport: { publisher: c.publisher, url: c.url, publishedAt: c.publishedAt },
   };
 
   const out = await draftArticle(input, access);
-  const passagesText = claims.flatMap((k) => k.texts.map((t) => t.passage));
+  const passagesText = all.flatMap((k) => k.texts.map((t) => t.passage));
   const checks = runDraftChecks(out, {
     allowedText: [
-      ...claims.flatMap((k) => [k.assessment.claim, ...k.assessment.figures]),
+      ...all.flatMap((k) => [k.assessment.claim, ...k.assessment.figures]),
       ...passagesText,
     ].join("\n"),
-    givenIds: claims.map((k) => k.kId),
+    givenIds: all.map((k) => k.kId),
     copySources: [...passagesText, c.headline, ...c.otherReports.map((r) => r.title)],
   });
-  const used = claims.filter((k) => out.claimIdsUsed.includes(k.kId));
+  const used = all.filter((k) => out.claimIdsUsed.includes(k.kId));
+  const usedPartial = used.filter((k) => k.kId.startsWith("P"));
   const failed = checks.filter((x) => !x.passed);
-  const ready = q.readiness === "ready_for_review" && failed.length === 0;
+  const ready =
+    q.readiness === "ready_for_review" && failed.length === 0 && usedPartial.length === 0;
   const uniq = (xs: string[]) => [...new Set(xs)];
 
   return {
@@ -239,16 +266,32 @@ async function draftOne(
     category: out.category,
     tags: out.tags,
     claimEvidence: used.map((k) => ({
-      claim: k.assessment.claim,
-      evidenceUrls: uniq(k.official.map((e) => e.url)),
+      claim: k.kId.startsWith("P")
+        ? `${k.assessment.claim} (partially verified)`
+        : k.assessment.claim,
+      evidenceUrls: uniq(
+        k.kId.startsWith("P")
+          ? [...k.official, ...k.secondary].map((e) => e.url)
+          : k.official.map((e) => e.url),
+      ),
     })),
-    missingEvidenceWarnings: unconfirmed,
+    missingEvidenceWarnings: [
+      ...partialClaims.map(
+        (k) =>
+          `Partially verified, check before publishing: ${k.assessment.claim} (${k.assessment.explanation})`,
+      ),
+      ...unconfirmed,
+    ],
     checks,
     readiness: ready ? "ready_for_review" : "needs_recheck",
     readinessReason: ready
       ? "Every check passed and every material claim is verified. Still needs human review before publishing."
       : [
-          q.readiness !== "ready_for_review" && "Some supporting claims are not verified.",
+          usedPartial.length > 0 &&
+            "Uses partially verified claims (attributed, not official fact); the author must check them before publishing.",
+          q.readiness !== "ready_for_review" &&
+            usedPartial.length === 0 &&
+            "Some supporting claims are not verified.",
           ...failed.map((x) => `${x.check.replace("_", " ")}: ${x.note}`),
         ]
           .filter(Boolean)
