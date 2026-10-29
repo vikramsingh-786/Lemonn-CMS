@@ -99,7 +99,7 @@ export function clean(items: readonly DiscoveredItem[], window: ResearchRun["win
       sourcePoints(b.sourceId) - sourcePoints(a.sourceId) ||
       a.publishedAt.localeCompare(b.publishedAt),
   );
-  // ponytail: O(n²) headline comparison; fine for ≤200 items per run, use MinHash if runs grow.
+  // ponytail: O(n²) headline comparison; fine for ≤1,400 items per run (7 sources × 200), use MinHash if runs grow.
   const clusters: Cluster[] = [];
   let duplicatesRemoved = 0;
   for (const item of kept) {
@@ -156,13 +156,15 @@ function scoreCluster(cluster: Cluster, windowEnd: number): { score: number; rea
   const bestTopic = topics.find((t) => (C.topicPoints[t] ?? 0) === best);
   if (bestTopic) add(best, `topic {p} (${bestTopic})`);
 
-  if (C.announcement.pattern.test(lead.title)) add(C.announcement.points, "announcement {p}");
-
   const path = new URL(lead.url).pathname;
-  for (const noise of C.noise) {
-    const hit = noise.pattern.test(lead.title) || ("path" in noise && noise.path.test(path));
-    if (hit) add(noise.points, `${noise.label} {p}`);
-  }
+  const noiseHits = C.noise.filter(
+    (n) => n.pattern.test(lead.title) || ("path" in n && n.path.test(path)),
+  );
+  // Tips, explainers, previews, questions and opinion that mention results/dividends etc. are
+  // not the official announcement, so they earn no announcement bonus.
+  if (noiseHits.length === 0 && C.announcement.pattern.test(lead.title))
+    add(C.announcement.points, "announcement {p}");
+  for (const noise of noiseHits) add(noise.points, `${noise.label} {p}`);
   return { score, reasons };
 }
 
@@ -227,6 +229,24 @@ export function scoreClusters(
   });
 }
 
+/**
+ * Step 4c: each lead publisher keeps its best `cap` candidates by rules score (ties → newer), so
+ * a busy source can't crowd out the rest and Gemini only screens what earned a place.
+ */
+export function capPerSource(
+  ranked: readonly RankedCandidate[],
+  cap: number,
+): { kept: RankedCandidate[]; dropped: number } {
+  const perSource = new Map<string, number>();
+  const kept: RankedCandidate[] = [];
+  for (const r of [...ranked].sort((a, b) => byRank(a.candidate, b.candidate))) {
+    const n = (perSource.get(r.candidate.publisher) ?? 0) + 1;
+    perSource.set(r.candidate.publisher, n);
+    if (n <= cap) kept.push(r);
+  }
+  return { kept, dropped: ranked.length - kept.length };
+}
+
 export type GeminiConfig = { apiKey: string | undefined; model: string };
 
 const MAX_GEMINI_CALLS = 6;
@@ -247,7 +267,9 @@ export async function rankRun(run: ResearchRun, gemini: GeminiConfig): Promise<v
   run.timings.push({ stage: "clean", ms: Date.now() - cleanStarted });
 
   const rankStarted = Date.now();
-  let ranked = scoreClusters(clusters, run.window);
+  const capped = capPerSource(scoreClusters(clusters, run.window), C.perSourceCap);
+  let ranked = capped.kept;
+  run.counts.belowSourceCap = capped.dropped;
 
   if (!gemini.apiKey) {
     run.warnings.push(

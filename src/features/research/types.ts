@@ -243,6 +243,8 @@ export type RunCounts = {
   excludedUndated: number;
   excludedStale: number;
   duplicatesRemoved: number;
+  /** Candidates beyond each publisher's top RANK_CONFIG.perSourceCap (absent in older runs). */
+  belowSourceCap?: number;
   uniqueCandidates: number;
   processed: number;
   verified: number;
@@ -269,7 +271,7 @@ export type ResearchRun = {
   finishedAt: string | null;
   draftTarget: number;
   coverage: SourceCoverage[];
-  /** Discovered stories on the 8 topics, newest first. */
+  /** Discovered stories on the 7 topics, newest first. */
   items: DiscoveredItem[];
   /** Kept items per topic name (an item can count under several topics). */
   topicCounts: Record<string, number>;

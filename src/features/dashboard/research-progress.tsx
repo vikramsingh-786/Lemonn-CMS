@@ -47,6 +47,7 @@ export function ResearchProgress({ run }: { run: ResearchRun }) {
     ["Off-topic", run.coverage.reduce((n, c) => n + c.offTopic, 0)],
     ["Discovered", run.items.length],
     ["Duplicates merged", counts.duplicatesRemoved],
+    ["Below source cap", counts.belowSourceCap ?? 0],
     ["Excluded", run.excluded.length],
     ["Candidates", counts.uniqueCandidates],
     ["Verified · held", `${counts.verified} · ${counts.held}`],
