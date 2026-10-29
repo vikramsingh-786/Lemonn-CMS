@@ -1,4 +1,4 @@
-// Prisma schema for Lemonn News CMS. Models will be added in a later phase.
+// Prisma schema for Lemonn News CMS.
 // Docs: https://pris.ly/d/prisma-schema
 
 generator client {
@@ -8,4 +8,19 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+/// One research run. `data` is the snapshot the dashboard reads; `evidence` holds the official
+/// passages drafting needs and is never returned by the API.
+model ResearchRun {
+  id            String    @id @db.Uuid
+  stage         String
+  data          Json
+  evidence      Json      @default("{}")
+  /// A step request holds the run until this time, so two requests never work on it at once.
+  stepLockUntil DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([stage, updatedAt])
 }

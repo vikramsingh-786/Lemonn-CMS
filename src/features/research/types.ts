@@ -263,6 +263,19 @@ export type RunCounts = {
 
 export type ResearchRun = {
   runId: string;
+  /** Source ids chosen for this run; the discovery step reads them. */
+  sourceIds: string[];
+  /** Verification pass in progress, kept between step requests (budgets and time count from its start). */
+  verifyPass?: {
+    startedAt: string;
+    searchesAtStart: number;
+    aiCallsAtStart: number;
+    /** Extra stories verified because fewer than DRAFT_MIN met the evidence bar. */
+    extra: number;
+    stopReason: string | null;
+  };
+  /** Drafting pass in progress, kept between step requests. */
+  draftPass?: { startedAt: string; aiCallsAtStart: number; stopReason: string | null };
   window: { start: string; end: string };
   stage: RunStage;
   /** Step currently being worked on; null when the run has finished. */
@@ -306,7 +319,8 @@ export type ResearchErrorCode =
   | "provider_timeout"
   | "provider_unavailable"
   | "ai_invalid_output"
-  | "internal_error";
+  | "internal_error"
+  | "unauthorized";
 
 export type ApiErrorBody = {
   error: {

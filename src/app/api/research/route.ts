@@ -1,7 +1,8 @@
-import { after } from "next/server";
 import { z } from "zod";
+import { requireApiSession } from "@/lib/session";
 import { DEFAULT_SOURCES } from "@/features/dashboard/data";
-import { needsTavily, startRun } from "@/features/research/discovery";
+import { needsTavily, newRun } from "@/features/research/discovery";
+import { activeRunId, createRun } from "@/features/research/run-store";
 import type { ApiErrorBody, StartRunResponse } from "@/features/research/types";
 import { serverEnv } from "@/lib/env";
 
@@ -30,8 +31,10 @@ function error(
   return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
 }
 
-/** Validate the request, then start a background run: discover → clean & rank → verify. */
+/** Validate the request and create the run; the dashboard then drives it with /step requests. */
 export async function POST(request: Request) {
+  const denied = await requireApiSession();
+  if (denied) return denied;
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return error(400, "invalid_request", "Invalid research request.");
 
@@ -57,12 +60,12 @@ export async function POST(request: Request) {
     );
   }
 
+  if (await activeRunId())
+    return error(409, "busy", "A research run is already in progress.", true);
   const end = new Date();
   const start = new Date(end.getTime() - WINDOW_HOURS * 3_600_000);
-  const started = startRun(enabled, { start: start.toISOString(), end: end.toISOString() }, env);
-  if (!started) return error(409, "busy", "A research run is already in progress.", true);
-
-  after(started.work);
-  const body: StartRunResponse = { runId: started.runId };
+  const run = newRun(enabled, { start: start.toISOString(), end: end.toISOString() });
+  await createRun(run);
+  const body: StartRunResponse = { runId: run.runId };
   return Response.json(body, { status: 202, headers: { "Cache-Control": "no-store" } });
 }

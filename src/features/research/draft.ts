@@ -6,7 +6,7 @@ import { runDraftChecks } from "./draft-checks";
 import { PARTIAL_REASON } from "./draft-score";
 import { relevantExcerpt } from "./extract";
 import { draftArticle, type DraftInput, type GeminiAccess } from "./gemini";
-import { loadEvidence, saveRun, type EvidencePassage } from "./run-store";
+import { loadEvidence, type EvidencePassage } from "./run-store";
 import {
   DRAFT_MIN,
   DRAFT_TARGET,
@@ -21,7 +21,8 @@ import {
 const CONCURRENCY = 2;
 /** Per drafting pass, retries included. */
 const MAX_GEMINI_CALLS = 12;
-const TIME_LIMIT_MS = 4 * 60_000;
+// Counted from the first drafting step; steps of CONCURRENCY drafts run back to back.
+const TIME_LIMIT_MS = 10 * 60_000;
 const PASSAGES_PER_CLAIM = 2;
 const PASSAGE_CHARS = 1200;
 
@@ -32,33 +33,38 @@ function warnOnce(run: ResearchRun, message: string) {
 }
 
 /**
- * Step 6 on a run: an original article per draft-queue story, from verified claims and their
- * official evidence only, then deterministic checks. Stories that already have a draft are
- * skipped, so calling it again (re)drafts only missing or failed ones.
+ * One drafting step (Step 6): an original article for each of the next CONCURRENCY draft-queue
+ * stories without a draft or a failure, from their claims and evidence, then deterministic checks.
+ * Returns true when every queued story has been tried (a retry clears failures to try again).
  */
-export async function draftRun(run: ResearchRun, env: ServerEnv): Promise<void> {
+export async function draftStep(run: ResearchRun, env: ServerEnv): Promise<boolean> {
   const todo = run.draftQueue
     .slice(0, DRAFT_TARGET)
-    .filter((q) => !run.drafts.some((d) => d.candidateId === q.candidateId));
+    .filter((q) => !q.draftError && !run.drafts.some((d) => d.candidateId === q.candidateId));
   if (!env.GEMINI_API_KEY) {
     if (todo.length > 0) warnOnce(run, "Drafting skipped: GEMINI_API_KEY not set.");
-    updateShortfall(run);
-    return;
+    return finishDrafting(run);
   }
-  if (todo.length === 0) {
-    updateShortfall(run);
-    return;
-  }
+  if (todo.length === 0) return finishDrafting(run);
 
-  const started = Date.now();
   run.stage = "drafting";
   run.currentStep = "draft";
-  const limit = run.counts.aiCallsUsed + MAX_GEMINI_CALLS;
+  const pass = (run.draftPass ??= {
+    startedAt: new Date().toISOString(),
+    aiCallsAtStart: run.counts.aiCallsUsed,
+    stopReason: null,
+  });
+  if (!pass.stopReason && Date.now() > Date.parse(pass.startedAt) + TIME_LIMIT_MS)
+    pass.stopReason = `Drafting time limit (${TIME_LIMIT_MS / 60_000} min) reached`;
+  if (pass.stopReason) {
+    for (const q of todo) q.draftError = `Not drafted: ${pass.stopReason}.`;
+    return finishDrafting(run);
+  }
   const access: GeminiAccess = {
     apiKey: env.GEMINI_API_KEY,
     model: env.GEMINI_MODEL_REASONING,
     spendCall: () => {
-      if (run.counts.aiCallsUsed >= limit)
+      if (run.counts.aiCallsUsed >= pass.aiCallsAtStart + MAX_GEMINI_CALLS)
         throw new FetchError(
           "budget",
           `Gemini call limit for drafting (${MAX_GEMINI_CALLS}) reached`,
@@ -67,19 +73,15 @@ export async function draftRun(run: ResearchRun, env: ServerEnv): Promise<void> 
     },
   };
   const passages = await loadEvidence(run.runId);
-  let stopReason: string | null = null;
-  let begun = 0;
+  const batch = todo.slice(0, CONCURRENCY);
+  run.stageDetail = `Drafting ${run.drafts.length + 1}–${run.drafts.length + batch.length} of ${Math.min(run.draftQueue.length, DRAFT_TARGET)}`;
 
-  await pool(todo, CONCURRENCY, async (q) => {
-    if (!stopReason && Date.now() - started > TIME_LIMIT_MS)
-      stopReason = "Drafting time limit (4 min) reached";
-    if (stopReason) {
-      q.draftError = `Not drafted: ${stopReason}.`;
+  await pool(batch, CONCURRENCY, async (q) => {
+    const c = run.candidates.find((x) => x.id === q.candidateId);
+    if (!c) {
+      q.draftError = "Not drafted: story not found.";
       return;
     }
-    const c = run.candidates.find((x) => x.id === q.candidateId);
-    if (!c) return;
-    run.stageDetail = `Drafting ${++begun} of ${todo.length}`;
     try {
       const draft = await draftOne(q, c, passages, access);
       if (typeof draft === "string") {
@@ -91,7 +93,7 @@ export async function draftRun(run: ResearchRun, env: ServerEnv): Promise<void> 
       }
     } catch (e) {
       if (e instanceof FetchError && e.kind === "budget") {
-        stopReason = e.message;
+        pass.stopReason = e.message;
         q.draftError = `Not drafted: ${e.message}.`;
       } else {
         const key = `gemini:${e instanceof FetchError ? e.kind : "unavailable"}`;
@@ -100,15 +102,20 @@ export async function draftRun(run: ResearchRun, env: ServerEnv): Promise<void> 
       }
     }
     run.counts.drafts = run.drafts.length;
-    void saveRun(run);
   });
+  return false;
+}
 
-  // Keep drafts in queue order.
+/** Ends the drafting pass: drafts in queue order, counts and why fewer drafts exist. */
+function finishDrafting(run: ResearchRun): true {
   const order = new Map(run.draftQueue.map((q, i) => [q.candidateId, i]));
   run.drafts.sort((a, b) => (order.get(a.candidateId) ?? 99) - (order.get(b.candidateId) ?? 99));
   run.counts.drafts = run.drafts.length;
   updateShortfall(run);
-  run.timings.push({ stage: "draft", ms: Date.now() - started });
+  if (run.draftPass)
+    run.timings.push({ stage: "draft", ms: Date.now() - Date.parse(run.draftPass.startedAt) });
+  delete run.draftPass;
+  return true;
 }
 
 /** Why fewer than DRAFT_TARGET drafts exist. */

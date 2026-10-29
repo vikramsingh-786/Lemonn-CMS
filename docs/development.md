@@ -50,7 +50,11 @@ All variables are server-only. Validate new ones with Zod on the server and add 
 ## Database
 
 - Schema: `prisma/schema.prisma`. Config: `prisma.config.ts` (loads `.env` automatically).
+- Research runs are stored in PostgreSQL, so the app needs `DATABASE_URL` (the CMS's own database,
+  never Lemonn production). Locally: create a database, set `DATABASE_URL`, run `pnpm db:migrate`.
 - After editing the schema: `pnpm db:migrate` (needs a local database), then commit the migration.
+- Deployed databases: run `pnpm db:deploy` (`prisma migrate deploy`) against them before or during
+  each deploy; it applies committed migrations only.
 - The generated client lives in `src/generated/prisma` and is not committed.
 
 ## Testing
