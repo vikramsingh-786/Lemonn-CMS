@@ -20,8 +20,6 @@ export const RANK_CONFIG = {
   coverageMax: 3,
 
   /** Source credibility; also picks the lead report of a duplicate cluster. */
-  exchangeSourceIds: ["nse", "bse"],
-  exchangePoints: 3,
   majorSourceIds: [
     "moneycontrol",
     "et-markets",

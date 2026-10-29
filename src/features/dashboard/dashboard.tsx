@@ -30,7 +30,6 @@ const INITIAL_SOURCES: ConfiguredSource[] = DEFAULT_SOURCES.map((s) => ({
   name: s.name,
   url: s.url,
   domain: sourceDomain(s),
-  isPrimarySource: s.isPrimarySource ?? false,
   enabled: s.enabled,
 }));
 
