@@ -20,8 +20,8 @@ import { ResearchProgress } from "./research-progress";
 import { VerificationReview } from "./verification-review";
 
 const POLL_INTERVAL_MS = 2_000;
-/** Client gives up polling after this long (the server stops starting new work at 8 min). */
-const MAX_POLL_MS = 12 * 60_000;
+/** Client gives up polling after this long (verification stops starting new work at 12 min). */
+const MAX_POLL_MS = 20 * 60_000;
 const MAX_POLL_FAILURES = 3;
 
 const INITIAL_SOURCES: ConfiguredSource[] = DEFAULT_SOURCES.map((s) => ({

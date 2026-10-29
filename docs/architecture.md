@@ -22,7 +22,9 @@ the responsible organisation's official source (exchange filings, company or reg
 domains resolved in `official-domains.ts`), reading pages/PDFs through `safe-fetch.ts` (`unpdf`
 for PDFs). Claim and story statuses are decided by application code (`gate()`), never by the
 AI. Verified stories are queued for drafting by an evidence score (`draft-score.ts`, at most
-`DRAFT_TARGET`). Step 6 (`draft.ts`) has Gemini write an original article from verified claims
+`DRAFT_TARGET`). While fewer than `DRAFT_MIN` (5) meet the evidence bar, verification continues
+down the ranking (up to 8 extra stories), then the queue fills to 5 with stories that have at
+least one verified claim; drafts use verified claims only. Step 6 (`draft.ts`) has Gemini write an original article from verified claims
 and their official evidence only, then runs deterministic checks (`draft-checks.ts`). Runs are
 saved as local JSON in `.data/runs/` (`run-store.ts`, gitignored) so a refresh or restart keeps
 results; `POST /api/research/[runId]/verify` and `/draft` retry only failed or unfinished stories.

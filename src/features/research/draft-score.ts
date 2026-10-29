@@ -55,35 +55,64 @@ export function verificationScore(c: CandidateReport): { score: number; reasons:
 }
 
 /**
- * Draft queue: eligible stories by verification score (ties → better rank), at most `target`.
- * Eligible: `verified` (ready for review), or `partially_verified` when every HIGH-materiality
- * claim is verified (needs an evidence recheck by the editor). Conflicting stories never qualify.
+ * The evidence bar: `verified`, or `partially_verified` with every HIGH-materiality claim verified.
+ */
+export function meetsEvidenceBar(c: CandidateReport): boolean {
+  if (c.verificationScore === null) return false;
+  if (c.status === "verified") return true;
+  const high = c.claims.filter((a) => a.materiality === "high");
+  return (
+    c.status === "partially_verified" &&
+    high.length > 0 &&
+    high.every((a) => a.status === "verified")
+  );
+}
+
+const bestFirst = (a: DraftQueueItem, b: DraftQueueItem) =>
+  b.verificationScore - a.verificationScore || a.rank - b.rank;
+
+/**
+ * Draft queue, best evidence first (ties → better rank), at most `target`: stories that meet the
+ * evidence bar. When fewer than `min` do, it fills up to `min` with the best partially verified
+ * stories that have at least one verified material claim; drafting uses only verified claims, so
+ * a story with none is never drafted. Conflicting stories never qualify.
  */
 export function buildDraftQueue(
   candidates: readonly CandidateReport[],
   target: number,
+  min = 0,
 ): DraftQueueItem[] {
-  return candidates
-    .flatMap((c): DraftQueueItem[] => {
-      if (c.verificationScore === null) return [];
-      const high = c.claims.filter((a) => a.materiality === "high");
-      const highVerified = high.length > 0 && high.every((a) => a.status === "verified");
-      if (c.status === "verified") {
-        return [item(c, "ready_for_review", "All material claims verified by official sources.")];
-      }
-      if (c.status === "partially_verified" && highVerified) {
-        return [
-          item(
+  const queue = candidates
+    .filter(meetsEvidenceBar)
+    .map((c) =>
+      c.status === "verified"
+        ? item(c, "ready_for_review", "All material claims verified by official sources.")
+        : item(
             c,
             "needs_recheck",
             "Every high-materiality claim verified; some supporting claims are not.",
           ),
-        ];
-      }
-      return [];
-    })
-    .sort((a, b) => b.verificationScore - a.verificationScore || a.rank - b.rank)
+    )
+    .sort(bestFirst)
     .slice(0, target);
+  if (queue.length >= min) return queue;
+  const fill = candidates
+    .filter(
+      (c) =>
+        c.verificationScore !== null &&
+        c.status === "partially_verified" &&
+        !meetsEvidenceBar(c) &&
+        c.claims.some((a) => a.materiality !== "low" && a.status === "verified"),
+    )
+    .map((c) =>
+      item(
+        c,
+        "needs_recheck",
+        `Below the evidence bar; drafted to reach ${min} drafts from its verified claims only. Check unverified claims before publishing.`,
+      ),
+    )
+    .sort(bestFirst);
+  return [...queue, ...fill.slice(0, min - queue.length)];
 }
 
 function item(

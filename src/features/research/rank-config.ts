@@ -22,7 +22,7 @@ export const RANK_CONFIG = {
   ],
   /** Opening words that are never the company ("Buzzing Stocks: X", "Q2 results: X"). */
   notCompanyWords: new Set(
-    "q1 q2 q3 q4 fy results result earnings profit loss revenue shares share stock stocks buzzing live breaking update updates market markets sensex nifty india indian why how what".split(
+    "q1 q2 q3 q4 fy results result earnings profit loss revenue net reports posts shares share stock stocks buzzing live breaking update updates market markets sensex nifty india indian why how what".split(
       " ",
     ),
   ),
