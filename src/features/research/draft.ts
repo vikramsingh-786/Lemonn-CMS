@@ -7,6 +7,7 @@ import { relevantExcerpt } from "./extract";
 import { draftArticle, type DraftInput, type GeminiAccess } from "./gemini";
 import { loadEvidence, saveRun, type EvidencePassage } from "./run-store";
 import {
+  DRAFT_MIN,
   DRAFT_TARGET,
   type CandidateReport,
   type DraftQueueItem,
@@ -115,9 +116,21 @@ function updateShortfall(run: ResearchRun) {
     return;
   }
   if (run.draftQueue.length < DRAFT_TARGET) {
+    const filled = run.draftQueue.filter((q) =>
+      q.reason.startsWith("Below the evidence bar"),
+    ).length;
+    const met = run.draftQueue.length - filled;
     reasons.push(
-      `Only ${run.draftQueue.length} ${run.draftQueue.length === 1 ? "story" : "stories"} met the evidence bar for drafting (verified, or every high-materiality claim verified).`,
+      `Only ${met} ${met === 1 ? "story" : "stories"} met the evidence bar for drafting (verified, or every high-materiality claim verified).`,
     );
+    if (filled > 0)
+      reasons.push(
+        `${filled} more ${filled === 1 ? "story was" : "stories were"} added to reach ${DRAFT_MIN}, drafted from verified claims only (needs recheck).`,
+      );
+    if (run.draftQueue.length < DRAFT_MIN)
+      reasons.push(
+        `Fewer than ${DRAFT_MIN} checked stories had any verified claim, so no more could be drafted without unverified facts.`,
+      );
   }
   const failed = run.draftQueue.filter((q) => q.draftError);
   if (failed.length > 0) {

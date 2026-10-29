@@ -35,20 +35,38 @@ function headlineWords(title: string): Set<string> {
   return new Set((words ?? []).filter((w) => w.length > 1 && w !== "rs" && !C.stopWords.has(w)));
 }
 
-/** First two meaningful, non-generic headline words ("pine labs"), or null when there aren't two. */
-function companyKey(title: string): string | null {
-  const words = (title.toLowerCase().match(/[\p{L}]+/gu) ?? []).filter(
-    (w) => w.length > 1 && !C.stopWords.has(w) && !C.notCompanyWords.has(w),
-  );
-  return words.length >= 2 ? `${words[0]} ${words[1]}` : null;
+/**
+ * The company a headline leads with: its first run of non-generic words, up to 4
+ * ("Buzzing Stocks: Jupiter Wagons gains…" → jupiter wagons; "Trent Q2 Results…" → trent).
+ */
+function companyName(title: string): string[] {
+  const name: string[] = [];
+  for (const w of title.toLowerCase().match(/[\p{L}]+/gu) ?? []) {
+    const generic =
+      w.length < 2 ||
+      C.stopWords.has(w) ||
+      C.notCompanyWords.has(w) ||
+      C.sameEvent.some((event) => event.test(w));
+    if (generic) {
+      if (name.length > 0) break;
+      continue;
+    }
+    name.push(w);
+    if (name.length === 4) break;
+  }
+  return name;
+}
+
+/** One name starts the other: "trent" ~ "trent", "equitas sfb" ~ "equitas sfb md ceo". */
+function sameCompany(a: string[], b: string[]): boolean {
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  return short.length > 0 && short.every((w, i) => long[i] === w);
 }
 
 /** Same company and the same kind of event: one story told in different words. */
 function sameEvent(a: DatedItem, b: DatedItem): boolean {
-  const key = companyKey(a.title);
   return (
-    key !== null &&
-    key === companyKey(b.title) &&
+    sameCompany(companyName(a.title), companyName(b.title)) &&
     C.sameEvent.some((event) => event.test(a.title) && event.test(b.title))
   );
 }

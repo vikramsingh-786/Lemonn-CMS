@@ -3,7 +3,7 @@ import { DEFAULT_SOURCES, sourceDomain } from "@/features/dashboard/data";
 import type { ServerEnv } from "@/lib/env";
 import { pool } from "@/lib/pool";
 import { FetchError, fetchApproved, isWithinDomain } from "@/lib/safe-fetch";
-import { buildDraftQueue, verificationScore } from "./draft-score";
+import { buildDraftQueue, meetsEvidenceBar, verificationScore } from "./draft-score";
 import { articleText, documentText, namesOrganisation, relevantExcerpt } from "./extract";
 import { checkFigure, dateHint, stageSupported } from "./figures";
 import {
@@ -22,6 +22,7 @@ import {
 import { saveEvidence, saveRun } from "./run-store";
 import { searchOfficial, searchWeb, type TavilyAccess } from "./tavily";
 import {
+  DRAFT_MIN,
   DRAFT_TARGET,
   type CandidateReport,
   type CandidateStatus,
@@ -33,14 +34,18 @@ import {
 
 const CONCURRENCY = 3;
 /** Per verification pass (a retry gets a fresh allowance). */
-const MAX_TAVILY_CALLS = 60;
-const MAX_GEMINI_CALLS = 34;
-const TIME_LIMIT_MS = 8 * 60_000;
+// Sized for NEWS_RESEARCH_MAX_VERIFY stories plus up to MAX_EXTRA more when < DRAFT_MIN pass.
+const MAX_TAVILY_CALLS = 100;
+const MAX_GEMINI_CALLS = 50;
+const TIME_LIMIT_MS = 12 * 60_000;
+/** Extra stories verified (in the same order) while fewer than DRAFT_MIN meet the evidence bar. */
+const MAX_EXTRA = 8;
 const PAGES_PER_CLAIM = 2;
 const ATTEMPTS_PER_CLAIM = 4;
 const SNIPPETS_PER_CLAIM = 2;
 const EVIDENCE_TO_MODEL = 8;
-const EXCERPT_CHARS = 3000;
+// Per document; claims share it turn by turn (see relevantExcerpt).
+const EXCERPT_CHARS = 6000;
 const DOC_TIMEOUT_MS = 20_000;
 /** Failed page fetches kept per run (reason: URL) to trace provider errors. */
 const MAX_FETCH_FAILURES = 30;
@@ -227,16 +232,31 @@ export async function verifyRun(
   }
 
   let begun = 0;
-  await pool(selected, CONCURRENCY, async (c) => {
+  const verifyOne = async (c: CandidateReport) => {
     if (!ctx.stopReason && Date.now() > ctx.deadline)
-      ctx.stopReason = "Time limit (8 min) reached.";
+      ctx.stopReason = `Time limit (${TIME_LIMIT_MS / 60_000} min) reached.`;
     if (ctx.stopReason)
       return markNotProcessed(c, `${ctx.stopReason} Not verified; retry to continue.`);
-    run.stageDetail = `Verifying ${++begun} of ${selected.length}`;
+    run.stageDetail = `Verifying story ${++begun}`;
     await verifyCandidate(c, ctx);
     summarise(run);
     void saveRun(run); // finished stories survive a crash or refresh
-  });
+  };
+  await pool(selected, CONCURRENCY, verifyOne);
+
+  // Fewer than DRAFT_MIN stories meet the evidence bar: verify the next ones in the same order.
+  let next = limit;
+  while (
+    !ctx.stopReason &&
+    run.candidates.filter(meetsEvidenceBar).length < DRAFT_MIN &&
+    next < Math.min(order.length, limit + MAX_EXTRA)
+  ) {
+    const batch = order
+      .slice(next, Math.min(next + CONCURRENCY, limit + MAX_EXTRA))
+      .filter((c) => !FINISHED.has(c.status));
+    next += CONCURRENCY;
+    await pool(batch, CONCURRENCY, verifyOne);
+  }
   if (ctx.stopReason)
     warnOnce(run, `Verification stopped early: ${ctx.stopReason} Use Retry to continue.`);
   summarise(run);
@@ -250,7 +270,7 @@ function summarise(run: ResearchRun) {
   run.counts.verified = processed.filter((c) => c.status === "verified").length;
   run.counts.held = processed.length - run.counts.verified;
   run.counts.notProcessed = run.candidates.filter((c) => c.status === "not_processed").length;
-  run.draftQueue = buildDraftQueue(run.candidates, DRAFT_TARGET);
+  run.draftQueue = buildDraftQueue(run.candidates, DRAFT_TARGET, DRAFT_MIN);
 }
 
 function resetForVerification(c: CandidateReport) {
@@ -519,8 +539,8 @@ async function searchAndRead(
   ctx.searched.set(key, found);
   let results;
   try {
-    // Exchange search for a dated event: only recent filings (older ones are last year's results).
-    const recentOnly = TIME_BOUND.has(cl.type) && domains === EXCHANGES;
+    // A dated event: only recent pages (older filings and releases are last year's results).
+    const recentOnly = TIME_BOUND.has(cl.type);
     results = await searchOfficial(
       {
         query: `${cl.authority} ${c.headline}`,

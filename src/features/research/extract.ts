@@ -128,8 +128,9 @@ const COVER = 300;
 const HALF_WINDOW = 450;
 
 /**
- * At most `maxChars` of `text` for the model: the cover (who filed what) plus the windows where
- * the claim's distinctive terms occur together, best-scoring first.
+ * At most `maxChars` of `text` for the model: the cover (who filed what) plus, for each claim, the
+ * windows where its distinctive terms occur together. Claims take turns choosing their best window,
+ * so one claim (or a cover letter) cannot crowd out the results table another claim needs.
  */
 export function relevantExcerpt(
   text: string,
@@ -137,7 +138,25 @@ export function relevantExcerpt(
   maxChars = 4000,
 ): string {
   if (text.length <= maxChars) return text;
-  const terms = claims.flatMap((c) => claimTerms(c.text, c.figures));
+  const ranked = claims.map((c) => rankedWindows(text, claimTerms(c.text, c.figures)));
+  const chosen: { start: number; end: number }[] = [];
+  let budget = maxChars - COVER;
+  for (let round = 0; budget > 0 && ranked.some((r) => r.length > round); round++) {
+    for (const windows of ranked) {
+      const w = windows[round];
+      if (!w || budget <= 0) continue;
+      if (chosen.some((c) => w.start < c.end && w.end > c.start)) continue;
+      const end = Math.min(w.end, w.start + budget);
+      chosen.push({ start: w.start, end });
+      budget -= end - w.start;
+    }
+  }
+  chosen.sort((a, b) => a.start - b.start);
+  return [text.slice(0, COVER), ...chosen.map((c) => text.slice(c.start, c.end))].join(" … ");
+}
+
+/** Windows around each hit of `terms`, best (most distinct term weight) first. */
+function rankedWindows(text: string, terms: readonly Term[]) {
   const hits: { pos: number; term: Term }[] = [];
   for (const term of terms) {
     for (const m of text.matchAll(term.regex)) {
@@ -156,18 +175,7 @@ export function relevantExcerpt(
     return { start, end, score: [...seen].reduce((n, t) => n + t.weight, 0) };
   });
   windows.sort((a, b) => b.score - a.score || a.start - b.start);
-
-  const chosen: { start: number; end: number }[] = [];
-  let budget = maxChars - COVER;
-  for (const w of windows) {
-    if (budget <= 0) break;
-    if (chosen.some((c) => w.start < c.end && w.end > c.start)) continue;
-    const end = Math.min(w.end, w.start + budget);
-    chosen.push({ start: w.start, end });
-    budget -= end - w.start;
-  }
-  chosen.sort((a, b) => a.start - b.start);
-  return [text.slice(0, COVER), ...chosen.map((c) => text.slice(c.start, c.end))].join(" … ");
+  return windows;
 }
 
 /** True when every number in `figure` appears in `text` (commas ignored); words: case-insensitive. */

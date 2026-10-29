@@ -4,6 +4,8 @@
  */
 
 export const DRAFT_TARGET = 10;
+/** Drafts aimed for every run: verification continues, then the queue fills, to reach this. */
+export const DRAFT_MIN = 5;
 
 export type RunStage =
   "discovering" | "expanding" | "ranking" | "processing" | "drafting" | "completed" | "failed";
