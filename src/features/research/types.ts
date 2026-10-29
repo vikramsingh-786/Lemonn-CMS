@@ -314,7 +314,7 @@ export type ApiErrorBody = {
 
 export type StartRunResponse = { runId: string };
 
-/** Source as exposed by /api/sources. */
+/** Source as shown on the dashboard (from DEFAULT_SOURCES). */
 export type ConfiguredSource = {
   id: string;
   name: string;

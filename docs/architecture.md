@@ -7,7 +7,8 @@ admin review them, and publish approved articles to the Lemonn public website.
 
 ## Current state
 
-The dashboard UI and research Step 3 (discovery) exist. `POST /api/research` starts a background
+The dashboard and the full research pipeline exist as a prototype: discovery, ranking, claim
+verification and drafting. `POST /api/research` starts a background
 run in server memory and `GET /api/research/[runId]` returns its progress. Discovery reads
 publishers' Google News sitemaps (config in `src/features/research/sitemaps.ts`) or, for sources
 without one, searches Tavily. It keeps stories from the last 24 hours on 7 topics
@@ -15,13 +16,20 @@ without one, searches Tavily. It keeps stories from the last 24 hours on 7 topic
 `src/lib/safe-fetch.ts`. Step 4 (`rank.ts`, weights in `rank-config.ts`) then drops undated and
 non-article items, merges duplicate reports, scores candidates with rules (announcement > topic >
 source > coverage > recency, minus noise penalties), keeps each publisher's top 20 and, when
-`GEMINI_API_KEY` is set, adds a Gemini relevance screen (`gemini.ts`), falling back to rules only. Step 5 (`verify.ts`) checks the top candidates' material claims against
+`GEMINI_API_KEY` is set, adds a Gemini relevance screen (`gemini.ts`), falling back to rules
+only. Step 5 (`verify.ts`) checks the top candidates' material claims against
 the responsible organisation's official source (exchange filings, company or regulator site;
 domains resolved in `official-domains.ts`), reading pages/PDFs through `safe-fetch.ts` (`unpdf`
-for PDFs). Claim and story statuses are decided by application code (`gate()`), never by the AI. Verified stories are queued for drafting by an evidence score
-(`draft-score.ts`, at most `DRAFT_TARGET`). Runs are saved as local JSON in `.data/runs/`
-(`run-store.ts`, gitignored) so a refresh or restart keeps results;
-`POST /api/research/[runId]/verify` re-verifies only failed or unfinished stories. There is still no database, queue, worker, auth, verification or drafting.
+for PDFs). Claim and story statuses are decided by application code (`gate()`), never by the
+AI. Verified stories are queued for drafting by an evidence score (`draft-score.ts`, at most
+`DRAFT_TARGET`). Step 6 (`draft.ts`) has Gemini write an original article from verified claims
+and their official evidence only, then runs deterministic checks (`draft-checks.ts`). Runs are
+saved as local JSON in `.data/runs/` (`run-store.ts`, gitignored) so a refresh or restart keeps
+results; `POST /api/research/[runId]/verify` and `/draft` retry only failed or unfinished stories.
+The source list is fixed in `src/features/dashboard/data.ts` (on/off per browser tab).
+
+Not built yet: database models, auth, job queue and worker (runs execute in the web process,
+one at a time), source management, draft editing/approval, publishing and the audit log.
 
 ## System boundaries
 
@@ -73,9 +81,12 @@ for PDFs). Claim and story statuses are decided by application code (`gate()`), 
 
 ```text
 src/
-  app/            Next.js routes (App Router)
-  components/ui/  shadcn/ui components (added as needed)
-  lib/            Shared server/client utilities (env.ts, utils.ts)
+  app/            Next.js routes (App Router) and API routes (api/research)
+  components/     Layout and shadcn/ui components (ui/)
+  features/
+    dashboard/    Dashboard UI and the default source list (data.ts)
+    research/     Research pipeline: discovery, rank, verify, draft, run store
+  lib/            Shared utilities (env.ts, safe-fetch.ts, pool.ts, utils.ts)
   generated/      Prisma client (generated, gitignored)
 prisma/           Schema and, later, migrations
 tests/unit/       Vitest

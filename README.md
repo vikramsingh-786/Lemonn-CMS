@@ -3,7 +3,8 @@
 Standalone internal CMS that will become Lemonn's AI-assisted financial news tool.
 It is fully separate from the `lemonn.co.in` application: its own repo, database and deployment.
 
-**Status:** project foundation only. No CMS features, auth, database models or workers yet.
+**Status:** research pipeline prototype. The dashboard runs discovery, ranking, claim verification and
+drafting; runs are saved as local JSON. No database models, auth, worker, editing or publishing yet.
 
 ## Stack
 
@@ -47,9 +48,14 @@ First-time Playwright use needs a browser: `pnpm exec playwright install chromiu
 
 See [.env.example](.env.example). All variables are server-only; never prefix secrets with `NEXT_PUBLIC_`.
 
-| Variable       | Required for                 | Notes                                              |
-| -------------- | ---------------------------- | -------------------------------------------------- |
-| `DATABASE_URL` | Prisma CLI / database access | The CMS's own PostgreSQL. Never Lemonn production. |
+| Variable                   | Required for                           | Notes                                              |
+| -------------------------- | -------------------------------------- | -------------------------------------------------- |
+| `DATABASE_URL`             | Prisma CLI / database access           | The CMS's own PostgreSQL. Never Lemonn production. |
+| `TAVILY_API_KEY`           | Verification; sources without sitemap  | Also the fallback when a sitemap fails             |
+| `GEMINI_API_KEY`           | Relevance screen, verification, drafts | Without it, ranking is rules only                  |
+| `GEMINI_MODEL_FAST`        | Optional                               | Default `gemini-3.5-flash-lite`                    |
+| `GEMINI_MODEL_REASONING`   | Optional                               | Default `gemini-3.8-flash`                         |
+| `NEWS_RESEARCH_MAX_VERIFY` | Optional                               | Stories verified per run, 1–20 (default 12)        |
 
 ## Adding shadcn/ui components
 

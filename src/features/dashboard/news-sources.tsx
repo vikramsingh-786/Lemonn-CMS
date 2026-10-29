@@ -1,15 +1,11 @@
-import { ExternalLink, Plus, Trash2 } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import type { ConfiguredSource } from "@/features/research/types";
-import { MAX_SOURCES } from "@/features/sources/validation";
 
 type NewsSourcesProps = {
   sources: readonly ConfiguredSource[];
   onToggle: (id: string, enabled: boolean) => void;
-  onAddSource: () => void;
-  onRemove: (source: ConfiguredSource) => void;
   disabled?: boolean;
 };
 
@@ -18,15 +14,8 @@ function displayUrl(url: string) {
   return (host.replace(/^www\./, "") + pathname).replace(/\/$/, "");
 }
 
-export function NewsSources({
-  sources,
-  onToggle,
-  onAddSource,
-  onRemove,
-  disabled,
-}: NewsSourcesProps) {
+export function NewsSources({ sources, onToggle, disabled }: NewsSourcesProps) {
   const enabled = sources.filter((s) => s.enabled).length;
-  const atLimit = sources.length >= MAX_SOURCES;
 
   return (
     <section
@@ -34,7 +23,7 @@ export function NewsSources({
       aria-labelledby="sources-heading"
       className="scroll-mt-28 surface-raised rounded-lg border border-border bg-card"
     >
-      <div className="flex flex-col gap-4 border-b border-border px-5 py-4 sm:px-6 sm:py-5 sm:flex-row sm:items-start sm:justify-between">
+      <div className="border-b border-border px-5 py-4 sm:px-6 sm:py-5">
         <div>
           <h2 id="sources-heading" className="font-display text-lg font-semibold tracking-tight">
             Research Sources
@@ -45,19 +34,8 @@ export function NewsSources({
             verification.
           </p>
           <p className="mt-2 text-xs font-medium tabular-nums">
-            {enabled} enabled · {sources.length} of {MAX_SOURCES} configured
+            {enabled} of {sources.length} enabled
           </p>
-        </div>
-        <div className="flex shrink-0 flex-col items-start gap-3 sm:items-end">
-          <Button variant="outline" onClick={onAddSource} disabled={atLimit || disabled}>
-            <Plus aria-hidden />
-            Add Source
-          </Button>
-          {atLimit && (
-            <p className="text-xs text-muted-foreground">
-              Maximum of {MAX_SOURCES} reached. Remove one to add another.
-            </p>
-          )}
         </div>
       </div>
 
@@ -99,23 +77,13 @@ export function NewsSources({
               aria-label={`Use ${source.name} for research`}
               disabled={disabled}
             />
-            <Button
-              variant="ghost"
-              size="sm"
-              className="px-2"
-              onClick={() => onRemove(source)}
-              disabled={disabled}
-              aria-label={`Remove ${source.name}`}
-            >
-              <Trash2 aria-hidden />
-            </Button>
           </li>
         ))}
       </ol>
 
       <p className="border-t border-border px-5 py-3 text-xs text-muted-foreground sm:px-6">
-        Sources are kept in server memory for this prototype and reset when the server restarts.
-        On/off switches apply to this browser tab only.
+        The source list is fixed in this prototype (src/features/dashboard/data.ts). On/off switches
+        apply to this browser tab only.
       </p>
     </section>
   );

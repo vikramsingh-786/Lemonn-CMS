@@ -9,7 +9,6 @@ import type {
   ResearchRun,
   StartRunResponse,
 } from "@/features/research/types";
-import { AddSourceDialog } from "./add-source-dialog";
 import { ArticleReview } from "./article-review";
 import { DiscoveredStories } from "./discovered-stories";
 import { DashboardSummary } from "./dashboard-summary";
@@ -33,7 +32,7 @@ const INITIAL_SOURCES: ConfiguredSource[] = DEFAULT_SOURCES.map((s) => ({
   enabled: s.enabled,
 }));
 
-type DialogState = "publish" | "add-source" | null;
+type DialogState = "publish" | null;
 
 async function readError(response: Response, fallback: string): Promise<string> {
   const body = (await response.json().catch(() => null)) as ApiErrorBody | null;
@@ -53,17 +52,6 @@ export function Dashboard() {
 
   useEffect(() => {
     mounted.current = true;
-    // Sync with the server's source list (sources added/removed earlier in this server session).
-    fetch("/api/sources")
-      .then((r) => (r.ok ? (r.json() as Promise<{ sources: ConfiguredSource[] }>) : null))
-      .then((data) => {
-        if (!data || !mounted.current) return;
-        setSources((current) => {
-          const enabled = new Map(current.map((s) => [s.id, s.enabled]));
-          return data.sources.map((s) => ({ ...s, enabled: enabled.get(s.id) ?? s.enabled }));
-        });
-      })
-      .catch(() => {});
     // Revisit / refresh: reload the run named in the URL (results are saved on the server).
     const runId = new URLSearchParams(window.location.search).get("run");
     if (runId && /^[0-9a-f-]{36}$/.test(runId)) {
@@ -97,21 +85,6 @@ export function Dashboard() {
 
   function toggleSource(id: string, enabled: boolean) {
     setSources((prev) => prev.map((s) => (s.id === id ? { ...s, enabled } : s)));
-  }
-
-  async function removeSource(source: ConfiguredSource) {
-    const response = await fetch(`/api/sources/${encodeURIComponent(source.id)}`, {
-      method: "DELETE",
-    }).catch(() => null);
-    if (response?.ok || response?.status === 404) {
-      setSources((prev) => prev.filter((s) => s.id !== source.id));
-    } else {
-      setError(
-        response
-          ? await readError(response, "Could not remove the source.")
-          : "Could not reach the server.",
-      );
-    }
   }
 
   /** Polls a run until it finishes; throws with a readable message on failure. */
@@ -196,12 +169,12 @@ export function Dashboard() {
       {/* Hero: title on the left, primary action on the right. */}
       <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <Badge variant="warning">Prototype · Results not saved</Badge>
+          <Badge variant="warning">Prototype · Nothing is published</Badge>
           <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
             News Research Dashboard
           </h1>
           <p className="mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
-            Manage news sources, research market developments, and prepare articles for publication.
+            Choose news sources, research market developments, and review evidence-backed drafts.
           </p>
         </div>
         <ResearchControls
@@ -242,13 +215,7 @@ export function Dashboard() {
 
         <div className="flex min-w-0 flex-col gap-5">
           {run && <ResearchProgress run={run} />}
-          <NewsSources
-            sources={sources}
-            onToggle={toggleSource}
-            onAddSource={() => setDialog("add-source")}
-            onRemove={removeSource}
-            disabled={running}
-          />
+          <NewsSources sources={sources} onToggle={toggleSource} disabled={running} />
           {run && <DiscoveredStories run={run} />}
           {run && (
             <VerificationReview run={run} onRetry={() => retry("verify")} retrying={running} />
@@ -274,12 +241,6 @@ export function Dashboard() {
         No article has been published. Publishing to the Lemonn website is not connected yet, and
         this draft was not sent anywhere. It stays private in this prototype.
       </Dialog>
-      <AddSourceDialog
-        open={dialog === "add-source"}
-        sourceCount={sources.length}
-        onClose={() => setDialog(null)}
-        onAdded={(source) => setSources((prev) => [...prev, source])}
-      />
     </>
   );
 }

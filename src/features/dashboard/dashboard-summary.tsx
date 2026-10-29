@@ -6,7 +6,6 @@ import {
   Globe,
   LoaderCircle,
 } from "lucide-react";
-import { MAX_SOURCES } from "@/features/sources/validation";
 import { RESEARCH_STATUS_LABEL, type ResearchStatus } from "./data";
 
 type DashboardSummaryProps = {
@@ -43,7 +42,7 @@ export function DashboardSummary({
     {
       label: "Total Sources",
       value: String(totalSources),
-      detail: `${enabledSources} enabled · max ${MAX_SOURCES}`,
+      detail: `${enabledSources} enabled`,
       icon: <Globe aria-hidden />,
     },
     {

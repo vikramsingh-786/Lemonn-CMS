@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { PipelineStep, ResearchRun } from "@/features/research/types";
-import { MAX_SOURCES } from "@/features/sources/validation";
 import { cn } from "@/lib/utils";
 import type { ResearchStatus } from "./data";
 
@@ -107,13 +106,9 @@ export function ResearchPanel({
       <p className="mt-3 text-sm text-muted-foreground">Sources enabled</p>
       <p className="mt-1 flex items-baseline gap-2 font-display text-4xl font-semibold tracking-tight tabular-nums">
         <span className="border-l-2 border-primary pl-3">{enabledSources}</span>
-        <span className="text-xl text-muted-foreground">
-          / {Math.min(totalSources, MAX_SOURCES)}
-        </span>
+        <span className="text-xl text-muted-foreground">/ {totalSources}</span>
       </p>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Window: rolling last 24 hours (UTC) · max {MAX_SOURCES} sources
-      </p>
+      <p className="mt-2 text-xs text-muted-foreground">Window: rolling last 24 hours (UTC)</p>
 
       <ol className="mt-4 flex flex-col gap-1.5">
         {STEPS.map(({ key, label, detail, icon: Icon }, i) => {

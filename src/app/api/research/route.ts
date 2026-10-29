@@ -3,7 +3,6 @@ import { z } from "zod";
 import { DEFAULT_SOURCES } from "@/features/dashboard/data";
 import { needsTavily, startRun } from "@/features/research/discovery";
 import type { ApiErrorBody, StartRunResponse } from "@/features/research/types";
-import { MAX_SOURCES } from "@/features/sources/validation";
 import { serverEnv } from "@/lib/env";
 
 const WINDOW_HOURS = 24;
@@ -17,7 +16,7 @@ const requestSchema = z
     sources: z
       .array(z.object({ id: z.string().regex(/^[a-z0-9-]{1,40}$/), enabled: z.boolean() }).strict())
       .min(1)
-      .max(MAX_SOURCES),
+      .max(DEFAULT_SOURCES.length),
   })
   .strict();
 
