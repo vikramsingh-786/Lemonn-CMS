@@ -104,7 +104,13 @@ async function assertAllowed(target: string, domains: readonly string[]): Promis
 export type DocKind = "xml" | "html" | "text" | "pdf";
 
 /** Size cap per content kind. */
-const MAX_BYTES: Record<DocKind, number> = { xml: 2 * MB, html: 2 * MB, text: 2 * MB, pdf: 8 * MB };
+// Exchange results filings are signed scans of 10–13 MB (with a text layer), so PDFs get 25 MB.
+const MAX_BYTES: Record<DocKind, number> = {
+  xml: 2 * MB,
+  html: 2 * MB,
+  text: 2 * MB,
+  pdf: 25 * MB,
+};
 
 const ACCEPT_HEADER: Record<DocKind, string> = {
   xml: "application/xml, text/xml",
@@ -168,7 +174,7 @@ export type FetchedDoc = { url: string; kind: DocKind; bytes: Uint8Array };
 /**
  * The one way the server fetches third-party content: https on 443, host inside one of `domains`,
  * public DNS answers only, manual redirects (max 3, each re-validated), timeout, size cap per kind
- * (2 MB XML/HTML/text, 8 MB PDF), and only the content kinds in `accept`.
+ * (2 MB XML/HTML/text, 25 MB PDF), and only the content kinds in `accept`.
  */
 export async function fetchApproved(
   target: string,

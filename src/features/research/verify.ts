@@ -42,8 +42,12 @@ const SNIPPETS_PER_CLAIM = 2;
 const EVIDENCE_TO_MODEL = 8;
 const EXCERPT_CHARS = 3000;
 const DOC_TIMEOUT_MS = 20_000;
+/** Failed page fetches kept per run (reason: URL) to trace provider errors. */
+const MAX_FETCH_FAILURES = 30;
 /** Official sources dated this long before the story cannot confirm a new event. */
 const STALE_MS = 180 * 24 * 3_600_000;
+/** Results are quarterly: an older results document is a previous quarter's, not this one's. */
+const EARNINGS_STALE_MS = 60 * 24 * 3_600_000;
 
 const EXCHANGES = ["bseindia.com", "nseindia.com"];
 /** Company claims of these types are filed with the exchanges, so filings are searched first. */
@@ -77,6 +81,14 @@ const NOT_EVIDENCE =
 /** Annual reports (huge, rarely the event) and exchange language mirrors (duplicates). */
 const SKIP =
   /annual[_-]?reports?|\/AR_\d|\/(?:hindi|bengali|telugu|marathi|gujarati|tamil|kannada|malayalam|odia|punjabi)\//i;
+/**
+ * A filing is the company's own only if it names the company near the top (letterhead / opening
+ * lines); a later mention means another filer's document (e.g. a supplier naming its customer).
+ */
+const LETTERHEAD_CHARS = 3000;
+const filedBy = (text: string, company: string) =>
+  namesOrganisation(text.slice(0, LETTERHEAD_CHARS), company);
+
 const PREFERRED =
   /investor|press|media|news|announcement|corpfiling|result|disclosure|circular|\.pdf(?:$|\?)/i;
 
@@ -113,6 +125,8 @@ type Ctx = {
   reasoning: GeminiAccess;
   deadline: number;
   stopReason: string | null;
+  /** Evidence URLs per story + organisation + site set, so each is searched once (not per claim). */
+  searched: Map<string, string[]>;
 };
 
 // ponytail: in-memory page cache (24h) so retries don't re-download the same documents; full
@@ -195,6 +209,7 @@ export async function verifyRun(
     },
     deadline: started + TIME_LIMIT_MS,
     stopReason: null,
+    searched: new Map(),
   };
 
   // Verifiable (official-announcement) stories first, then by rank. Same order on retries.
@@ -417,6 +432,9 @@ async function fetchPage(
   } catch (e) {
     if (e instanceof FetchError && e.kind === "blocked") counts.pagesBlocked++;
     countError(ctx.run, "fetch", e);
+    const failures = (ctx.run.fetchFailures ??= []);
+    if (failures.length < MAX_FETCH_FAILURES)
+      failures.push(`${e instanceof FetchError ? e.message : "request failed"}: ${url}`);
     return null;
   }
 }
@@ -450,7 +468,7 @@ async function collectOfficial(
   if (!check && isCompany) {
     for (const e of evidence.values()) {
       if (e.record.sourceType !== "official_filing" || e.record.retrieval !== "page") continue;
-      check = domainFromFiling(e.text, cl.authority, namesOrganisation(e.text, cl.authority));
+      check = domainFromFiling(e.text, cl.authority, filedBy(e.text, cl.authority));
       if (check) break;
     }
   }
@@ -490,10 +508,26 @@ async function searchAndRead(
   left: { attempts: number; pages: number; snippets: number },
   ctx: Ctx,
 ) {
+  // One search per story, organisation and site set; later claims reuse its results.
+  const key = `${c.id}|${cl.authority.toLowerCase()}|${domains.join(",")}`;
+  const done = ctx.searched.get(key);
+  if (done) {
+    for (const url of done) evidence.get(url)?.claimIds.add(cl.id);
+    return;
+  }
+  const found: string[] = [];
+  ctx.searched.set(key, found);
   let results;
   try {
+    // Exchange search for a dated event: only recent filings (older ones are last year's results).
+    const recentOnly = TIME_BOUND.has(cl.type) && domains === EXCHANGES;
     results = await searchOfficial(
-      { query: `${cl.authority} ${cl.text}`, domains, maxResults: 5 },
+      {
+        query: `${cl.authority} ${c.headline}`,
+        domains,
+        maxResults: 5,
+        ...(recentOnly && { timeRange: "month" as const }),
+      },
       ctx.tavily,
     );
   } catch (e) {
@@ -525,6 +559,7 @@ async function searchAndRead(
     const existing = evidence.get(r.url);
     if (existing) {
       existing.claimIds.add(cl.id);
+      found.push(r.url);
       if (existing.record.retrieval === "page") left.pages--;
       continue;
     }
@@ -532,10 +567,16 @@ async function searchAndRead(
     const isFiling = EXCHANGES.some((d) => isWithinDomain(host(r.url), d));
     const text = (await fetchPage(r.url, domains, ctx, ["html", "pdf", "text"])) ?? "";
     const page = text.length >= 50;
-    // Exchange search often returns other companies' filings: skip those, try the next result.
-    if (page && isFiling && isCompany && !namesOrganisation(text, cl.authority)) continue;
+    // Exchange search often returns other companies' filings: skip those (page or snippet).
+    if (isFiling && isCompany) {
+      const own = page
+        ? filedBy(text, cl.authority)
+        : namesOrganisation(`${r.title} ${r.snippet}`, cl.authority);
+      if (!own) continue;
+    }
     if (!page && left.snippets <= 0) continue;
-    const dated = dateHint(r.url, r.publishedAt);
+    const dated = dateHint(r.url, r.publishedAt, page ? text : "");
+    const staleMs = cl.type === "earnings" ? EARNINGS_STALE_MS : STALE_MS;
     evidence.set(r.url, {
       text: page ? text : r.snippet,
       claimIds: new Set([cl.id]),
@@ -555,9 +596,10 @@ async function searchAndRead(
         retrieval: page ? "page" : "snippet",
         retrievedAt: new Date().toISOString(),
         excerpt: "",
-        stale: TIME_BOUND.has(cl.type) && dated !== null && dated.getTime() < storyTime - STALE_MS,
+        stale: TIME_BOUND.has(cl.type) && dated !== null && dated.getTime() < storyTime - staleMs,
       },
     });
+    found.push(r.url);
     if (page) left.pages--;
     else left.snippets--;
   }
@@ -640,7 +682,7 @@ export function independentPublishers(
  * THE GATE: the only place claim and story statuses are decided (AI confidence never is).
  *
  * Claim: conflicting_evidence if an official source contradicts it; verified if an
- * authoritative page/PDF (the authority's validated domain, or an exchange filing naming the
+ * authoritative page/PDF (the authority's validated domain, or an exchange filing filed by the
  * company; not stale) supports it AND every figure and the deal stage appear in that text;
  * partially_verified if supported only by snippets, secondary news, another organisation's page,
  * a stale page, or with a figure/stage missing; otherwise unverified.
@@ -676,16 +718,21 @@ export function gate(
       ((authDomain !== null && isWithinDomain(e.record.publisher, authDomain)) ||
         (e.record.sourceType === "official_filing" &&
           cl.authorityKind === "company" &&
-          namesOrganisation(e.text, cl.authority)));
+          filedBy(e.text, cl.authority)));
     const supports = mine.filter((l) => l.relation === "supports");
-    const contradiction = mine.find(
-      (l) => l.relation === "contradicts" && byId.get(l.evidenceId)!.record.kind === "primary",
-    );
+    // An old document (e.g. last year's results) cannot contradict a new event.
+    const contradiction = mine.find((l) => {
+      const ev = byId.get(l.evidenceId)!.record;
+      return l.relation === "contradicts" && ev.kind === "primary" && !ev.stale;
+    });
     const authSupport = supports.filter((l) => official(byId.get(l.evidenceId)!));
     const fresh = authSupport.filter((l) => !byId.get(l.evidenceId)!.record.stale);
     const checks = fresh.map((l) => {
       const text = byId.get(l.evidenceId)!.text;
-      const notes = [...cl.figures.map((f) => checkFigure(f, text)), stageSupported(cl.stage, text)]
+      const notes = [
+        ...cl.figures.map((f) => checkFigure(f, text, cl.figures)),
+        stageSupported(cl.stage, text),
+      ]
         .filter((r) => !r.found)
         .map((r) => r.note);
       return { link: l, notes };

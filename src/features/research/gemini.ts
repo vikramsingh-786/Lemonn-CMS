@@ -168,7 +168,7 @@ For EVERY candidate id, return:
 - relevant: true if it is about Indian markets, Indian companies, Indian financial regulation or the Indian economy, or a global event with clear impact on Indian markets. Otherwise false.
 - newsworthy: true if it reports a genuine news event. False for opinion, interviews, stock tips, previews, listicles, explainers and live blogs.
 - impact: "high", "medium" or "low" likely impact on Indian investors.
-- verifiable: true if the core fact is an official announcement or record (results, dividend, order win, deal, appointment, filing, regulator/government action, official data release).
+- verifiable: true ONLY if the core fact is an announcement or record that has ALREADY been officially published by the organisation itself (company results already declared, dividend, order win, deal, appointment, exchange filing, regulator circular or order, government decision, official data release). False for previews and expectations ("set to", "likely", "expected", results not yet declared), speeches, interviews or remarks not yet in an official document, demands or proposals by unions or other parties, analysis and commentary on earlier results, market moves and price action, and service notices (bank holidays, how-to updates).
 - reason: one short sentence explaining the judgement.
 
 Judge only from the given text. Do not invent facts.`;
@@ -321,9 +321,11 @@ Rules:
 - A page that merely mentions the entity does not confirm a specific new fact.
 - Percent vs percentage points, units, currencies and periods (quarter, year, YoY vs QoQ, standalone vs consolidated) must match.
 - Figures in different units (crore vs lakh, million vs billion) match only if they convert exactly.
+- A percentage change the excerpt does not print still counts as stated when the excerpt gives both the current and the comparison value and the change computes to it (allowing for the claim's rounding), e.g. 441 vs 195 supports "up 126%".
 - Immaterial wording differences ("the board declared" vs "the company declared") do not block support.
 - Deal stage must match: an official text saying a deal is proposed or under evaluation does not support a claim that it was approved or completed.
 - A document dated before the event cannot confirm the event.
+- Evidence about a different reporting period than the claim (an earlier quarter, or the same quarter of an earlier year) neither supports nor contradicts it: use "does_not_establish", not "contradicts".
 - Use only the given excerpts. Do not use outside knowledge.`;
 
 /** Links between claims and evidence items (reasoning model). */
@@ -358,8 +360,9 @@ export async function matchEvidence(
       },
     }),
     output: z.object({ links: z.array(linkSchema) }),
-    // Thinking tokens count as output; 4096 was cut off on real filings.
-    maxOutputTokens: 8192,
+    // Thinking tokens count as output; 8192 was still cut off on real filings (Oct 2026 runs).
+    // Only tokens actually used are billed, so a high ceiling costs nothing extra.
+    maxOutputTokens: 24576,
     // Reasoning over ~8 excerpts took >45s on real runs (2 timeouts).
     timeoutMs: 120_000,
   });
@@ -434,7 +437,8 @@ export async function draftArticle(input: DraftInput, access: GeminiAccess): Pro
       claimIdsUsed: strArray,
     }),
     output: draftOutput,
-    maxOutputTokens: 8192,
+    // Same reasoning model as matching: leave room for thinking (billed only when used).
+    maxOutputTokens: 16384,
     timeoutMs: 60_000,
     temperature: 0.3,
   });

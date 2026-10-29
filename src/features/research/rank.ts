@@ -35,6 +35,24 @@ function headlineWords(title: string): Set<string> {
   return new Set((words ?? []).filter((w) => w.length > 1 && w !== "rs" && !C.stopWords.has(w)));
 }
 
+/** First two meaningful, non-generic headline words ("pine labs"), or null when there aren't two. */
+function companyKey(title: string): string | null {
+  const words = (title.toLowerCase().match(/[\p{L}]+/gu) ?? []).filter(
+    (w) => w.length > 1 && !C.stopWords.has(w) && !C.notCompanyWords.has(w),
+  );
+  return words.length >= 2 ? `${words[0]} ${words[1]}` : null;
+}
+
+/** Same company and the same kind of event: one story told in different words. */
+function sameEvent(a: DatedItem, b: DatedItem): boolean {
+  const key = companyKey(a.title);
+  return (
+    key !== null &&
+    key === companyKey(b.title) &&
+    C.sameEvent.some((event) => event.test(a.title) && event.test(b.title))
+  );
+}
+
 function jaccard(a: Set<string>, b: Set<string>): number {
   let shared = 0;
   for (const w of a) if (b.has(w)) shared++;
@@ -110,7 +128,7 @@ export function clean(items: readonly DiscoveredItem[], window: ResearchRun["win
         (member, i) =>
           member.canonical === item.canonical ||
           (Math.abs(Date.parse(member.publishedAt) - t) <= C.duplicateWindowMs &&
-            jaccard(c.words[i]!, words) >= C.duplicateJaccard),
+            (jaccard(c.words[i]!, words) >= C.duplicateJaccard || sameEvent(member, item))),
       ),
     );
     if (match) {

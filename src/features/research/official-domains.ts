@@ -173,6 +173,9 @@ export function knownAuthorityDomain(authority: string): string | null {
 
 const SEARCH_DEPTH = 10;
 
+/** Main-site suffixes, preferred over country sites (asianpaints.com over asianpaints.com.sg). */
+const MAIN_SITE = /\.(?:com|in|co\.in|bank\.in|org|net)$/;
+
 /**
  * Picks the official domain from independent search hosts (top 10). The model's hint counts only
  * when the search also ranks it. No prefix matching: "acmeparts" is not "Acme Motors".
@@ -185,6 +188,7 @@ export function chooseOfficialDomain(
   const names = nameLabels(authority);
   const hintDomain = hint ? registrableDomain(hint.replace(/^https?:\/\//, "").split("/")[0]!) : "";
   const rejected: string[] = [];
+  let countrySite: DomainCheck | null = null;
   for (const host of searchHosts.slice(0, SEARCH_DEPTH)) {
     const domain = registrableDomain(host);
     if (NOT_OFFICIAL.has(domain) || LOOKALIKE.test(label(domain))) {
@@ -192,12 +196,16 @@ export function chooseOfficialDomain(
       continue;
     }
     if (names.has(label(domain))) {
-      return {
+      const check: DomainCheck = {
         entity: authority,
         domain,
         status: "validated",
         reason: "Domain name matches the organisation",
       };
+      // A country site (pinelabs.my) counts only if no main site ranks in the top results.
+      if (MAIN_SITE.test(domain)) return check;
+      countrySite ??= check;
+      continue;
     }
     if (hintDomain && domain === hintDomain) {
       return {
@@ -209,6 +217,7 @@ export function chooseOfficialDomain(
     }
     rejected.push(domain);
   }
+  if (countrySite) return countrySite;
   return searchHosts.length === 0
     ? {
         entity: authority,

@@ -8,6 +8,24 @@ export const RANK_CONFIG = {
   duplicateWindowMs: 12 * 3_600_000,
   /** Jaccard similarity of meaningful headline words needed to merge. */
   duplicateJaccard: 0.6,
+  /**
+   * Same story, different wording: headlines also merge when their first two meaningful words
+   * (the company) match and both describe the same kind of event.
+   */
+  sameEvent: [
+    /\bQ[1-4]\b|\bresults?\b|\bearnings\b|\bprofit\b|\bloss\b|\brevenue\b|\bquarter\b/i,
+    /\bresign|\bappoint|\bsteps? down\b|\bquits?\b/i,
+    /\border\b/i,
+    /\bdividend|\bbonus\b|\bbuy-?backs?\b|\bstock split\b/i,
+    /\bIPO\b|\bDRHP\b|\blisting\b/i,
+    /\bacqui|\bstake\b|\bmerger\b|\bdeal\b/i,
+  ],
+  /** Opening words that are never the company ("Buzzing Stocks: X", "Q2 results: X"). */
+  notCompanyWords: new Set(
+    "q1 q2 q3 q4 fy results result earnings profit loss revenue shares share stock stocks buzzing live breaking update updates market markets sensex nifty india indian why how what".split(
+      " ",
+    ),
+  ),
 
   /*
    * Score weights follow the editorial priority, highest max first:
