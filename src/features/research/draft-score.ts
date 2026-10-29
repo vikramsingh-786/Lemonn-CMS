@@ -73,16 +73,14 @@ const bestFirst = (a: DraftQueueItem, b: DraftQueueItem) =>
 
 /**
  * Draft queue, best evidence first (ties → better rank), at most `target`: stories that meet the
- * evidence bar. When fewer than `min` do, it fills up to `min` with the best partially verified
- * stories that have at least one verified material claim; drafting uses only verified claims, so
- * a story with none is never drafted. Conflicting stories never qualify.
+ * evidence bar, then every other partially verified story (drafted for the author to review before
+ * publishing). Unverified and conflicting stories never qualify.
  */
 export function buildDraftQueue(
   candidates: readonly CandidateReport[],
   target: number,
-  min = 0,
 ): DraftQueueItem[] {
-  const queue = candidates
+  const strong = candidates
     .filter(meetsEvidenceBar)
     .map((c) =>
       c.status === "verified"
@@ -93,27 +91,19 @@ export function buildDraftQueue(
             "Every high-materiality claim verified; some supporting claims are not.",
           ),
     )
-    .sort(bestFirst)
-    .slice(0, target);
-  if (queue.length >= min) return queue;
-  const fill = candidates
+    .sort(bestFirst);
+  const partial = candidates
     .filter(
       (c) =>
-        c.verificationScore !== null &&
-        c.status === "partially_verified" &&
-        !meetsEvidenceBar(c) &&
-        c.claims.some((a) => a.materiality !== "low" && a.status === "verified"),
+        c.verificationScore !== null && c.status === "partially_verified" && !meetsEvidenceBar(c),
     )
-    .map((c) =>
-      item(
-        c,
-        "needs_recheck",
-        `Below the evidence bar; drafted to reach ${min} drafts from its verified claims only. Check unverified claims before publishing.`,
-      ),
-    )
+    .map((c) => item(c, "needs_recheck", PARTIAL_REASON))
     .sort(bestFirst);
-  return [...queue, ...fill.slice(0, min - queue.length)];
+  return [...strong, ...partial].slice(0, target);
 }
+
+export const PARTIAL_REASON =
+  "Partially verified: some claims have only partial support. The author must review before publishing.";
 
 function item(
   c: CandidateReport,

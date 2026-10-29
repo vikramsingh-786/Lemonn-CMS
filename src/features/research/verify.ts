@@ -270,7 +270,7 @@ function summarise(run: ResearchRun) {
   run.counts.verified = processed.filter((c) => c.status === "verified").length;
   run.counts.held = processed.length - run.counts.verified;
   run.counts.notProcessed = run.candidates.filter((c) => c.status === "not_processed").length;
-  run.draftQueue = buildDraftQueue(run.candidates, DRAFT_TARGET, DRAFT_MIN);
+  run.draftQueue = buildDraftQueue(run.candidates, DRAFT_TARGET);
 }
 
 function resetForVerification(c: CandidateReport) {
