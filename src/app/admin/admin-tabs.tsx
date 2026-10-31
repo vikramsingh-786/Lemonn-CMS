@@ -4,12 +4,13 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { href: "/admin/users", label: "Accounts" },
   { href: "/admin/runs", label: "Research runs" },
+  { href: "/admin/sources", label: "Sources" },
 ] as const;
 
 /** Switches between the admin pages. */
 export function AdminTabs({ active }: { active: (typeof TABS)[number]["href"] }) {
   return (
-    <nav aria-label="Admin" className="flex gap-2">
+    <nav aria-label="Admin" className="flex flex-wrap gap-2">
       {TABS.map((t) => (
         <Link
           key={t.href}

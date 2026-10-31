@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { DiscoveredStories } from "./discovered-stories";
+import { OffTopicStories } from "./off-topic-stories";
 import { ResearchFeed } from "./research-panel";
 import { ResearchProgress } from "./research-progress";
 import type { SessionUser } from "@/lib/roles";
@@ -93,6 +94,7 @@ export function ResearchDetails({ runId, user }: { runId: string; user: SessionU
           <div className="flex min-w-0 flex-col gap-5">
             <ResearchProgress run={run} />
             <DiscoveredStories run={run} />
+            <OffTopicStories run={run} />
             <VerificationReview
               run={run}
               onRetry={canRetry ? () => void retry("verify") : undefined}

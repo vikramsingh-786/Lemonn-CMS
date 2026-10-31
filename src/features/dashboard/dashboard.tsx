@@ -10,29 +10,27 @@ import type { ConfiguredSource, ResearchDraft } from "@/features/research/types"
 import { can, type SessionUser } from "@/lib/roles";
 import { ArticleReview } from "./article-review";
 import { DashboardSummary } from "./dashboard-summary";
-import { DEFAULT_SOURCES, sourceDomain } from "./data";
 import { NewsSources } from "./news-sources";
 import { ResearchControls } from "./research-controls";
 import { ResearchPanel } from "./research-panel";
 import { useResearchRun } from "./use-research-run";
-
-const INITIAL_SOURCES: ConfiguredSource[] = DEFAULT_SOURCES.map((s) => ({
-  id: s.id,
-  name: s.name,
-  url: s.url,
-  domain: sourceDomain(s),
-  enabled: s.enabled,
-}));
 
 /**
  * Home: start research, follow its progress, and review the final drafts. The internal details
  * (discovered and ranked stories, verification) live on /research/[runId]. Runs are saved in the
  * CMS database; nothing is published or sent to lemonn.co.in.
  */
-export function Dashboard({ user }: { user: SessionUser }) {
+export function Dashboard({
+  user,
+  defaultSources,
+}: {
+  user: SessionUser;
+  /** Every source, on or off as an admin chose; the switches start from this. */
+  defaultSources: ConfiguredSource[];
+}) {
   const canRun = can(user.role, "research:run");
   const canEdit = can(user.role, "articles:edit");
-  const [sources, setSources] = useState<ConfiguredSource[]>(INITIAL_SOURCES);
+  const [sources, setSources] = useState<ConfiguredSource[]>(defaultSources);
   const [articles, setArticles] = useState<Record<string, ArticleSummary>>({});
   const [opening, setOpening] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
@@ -222,6 +220,7 @@ export function Dashboard({ user }: { user: SessionUser }) {
               setSources((prev) => prev.map((s) => (s.id === id ? { ...s, enabled } : s)))
             }
             disabled={running || !canRun}
+            canManage={can(user.role, "sources:manage")}
           />
         </div>
       </div>

@@ -4,6 +4,7 @@ import { DEFAULT_SOURCES, sourceDomain, type NewsSource } from "@/features/dashb
 import { pool } from "@/lib/pool";
 import { FetchError, isWithinDomain } from "@/lib/safe-fetch";
 import type { ServerEnv } from "@/lib/env";
+import { saveOffTopic } from "./run-store";
 import { NEWS_SITEMAPS, readNewsSitemaps, type RawItem } from "./sitemaps";
 import { searchTavily } from "./tavily";
 import { TOPICS, classifyTopics } from "./topics";
@@ -11,6 +12,7 @@ import {
   DRAFT_TARGET,
   type DiscoveredItem,
   type DiscoveryMethod,
+  type OffTopicItem,
   type ResearchRun,
   type SourceCoverage,
 } from "./types";
@@ -19,6 +21,8 @@ import {
 const MAX_PER_SOURCE = 200;
 const CONCURRENCY = 3;
 const MAX_TAVILY_CALLS = 20;
+/** Off-topic stories kept per source for editors to check the topic filter (titles only). */
+const MAX_OFF_TOPIC_PER_SOURCE = 100;
 
 /** True when the source has no sitemap, so a Tavily key is required up front. */
 export function needsTavily(source: NewsSource): boolean {
@@ -81,11 +85,13 @@ export async function discoverStep(run: ResearchRun, env: ServerEnv): Promise<vo
   const started = Date.now();
   const sources = DEFAULT_SOURCES.filter((s) => run.sourceIds.includes(s.id));
   let done = 0;
+  const offTopic: OffTopicItem[] = [];
   await pool(sources, CONCURRENCY, async (source) => {
-    await discoverSource(run, source, env.TAVILY_API_KEY);
+    offTopic.push(...(await discoverSource(run, source, env.TAVILY_API_KEY)));
     run.stageDetail = `Discovering: ${++done} of ${sources.length} sources done`;
   });
   run.items.sort(newestFirst);
+  await saveOffTopic(run.runId, offTopic.sort(newestFirst));
   run.timings.push({ stage: "discovery_total", ms: Date.now() - started });
   if (run.coverage.every((c) => c.status === "failed")) {
     run.stage = "failed";
@@ -116,7 +122,13 @@ function countError(run: ResearchRun, provider: string, e: unknown) {
   run.errorCounts[`${provider}:${kind}`] = (run.errorCounts[`${provider}:${kind}`] ?? 0) + 1;
 }
 
-async function discoverSource(run: ResearchRun, source: NewsSource, tavilyKey: string | undefined) {
+/** Discovers one source into `run`; returns the stories it dropped as off-topic. */
+async function discoverSource(
+  run: ResearchRun,
+  source: NewsSource,
+  tavilyKey: string | undefined,
+): Promise<OffTopicItem[]> {
+  const dropped: OffTopicItem[] = [];
   const started = Date.now();
   const domain = sourceDomain(source);
   const coverage: SourceCoverage = {
@@ -168,9 +180,15 @@ async function discoverSource(run: ResearchRun, source: NewsSource, tavilyKey: s
       const t = item.publishedAt ? Date.parse(item.publishedAt) : null;
       if (t !== null && (t < start || t > end)) continue;
       coverage.inWindow++;
-      const topics = classifyTopics(`${item.title}\n${item.snippet}`, url);
+      const topics = classifyTopics(item.title, item.snippet, url);
       if (topics.length === 0) {
         coverage.offTopic++;
+        dropped.push({
+          url,
+          title: item.title,
+          publisher: source.name,
+          publishedAt: item.publishedAt,
+        });
         continue;
       }
       candidates.push({
@@ -201,4 +219,5 @@ async function discoverSource(run: ResearchRun, source: NewsSource, tavilyKey: s
     run.coverage.push(coverage); // only finished sources appear in coverage
     run.timings.push({ stage: source.name, ms: Date.now() - started });
   }
+  return dropped.sort(newestFirst).slice(0, MAX_OFF_TOPIC_PER_SOURCE);
 }
