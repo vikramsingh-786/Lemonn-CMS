@@ -309,7 +309,7 @@ function EmptyState({ filtered, hasRun }: { filtered: boolean; hasRun: boolean }
     : hasRun
       ? [
           "No drafts",
-          "No story was verified strongly enough to draft, or drafting failed. See the Verification section and the run summary.",
+          "No story was verified strongly enough to draft, or drafting failed. See Internal research details for the verification evidence and run summary.",
         ]
       : [
           "No research results yet",
