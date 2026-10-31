@@ -21,6 +21,35 @@ model ResearchRun {
   stepLockUntil DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  articles      Article[]
 
   @@index([stage, updatedAt])
+}
+
+/// An editor's working copy of one AI draft (the run's draft stays untouched). Created on first
+/// edit; `version` rises on every save so two tabs can't silently overwrite each other.
+model Article {
+  id             String      @id @default(uuid()) @db.Uuid
+  runId          String      @db.Uuid
+  run            ResearchRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  /// The story within the run (ResearchDraft.candidateId).
+  candidateId    String
+  /// draft | ready | rejected
+  status         String      @default("draft")
+  headline       String
+  summary        String
+  /// Markdown subset: paragraphs, ## / ### headings, lists, quotes, **bold**, *italic*.
+  body           String
+  seoTitle       String
+  seoDescription String
+  category       String
+  tags           String[]
+  /// Deterministic checks from the last save.
+  checks         Json
+  version        Int         @default(1)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@unique([runId, candidateId])
+  @@index([status, updatedAt])
 }

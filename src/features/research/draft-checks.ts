@@ -1,17 +1,9 @@
 import { checkFigure } from "./figures";
 import type { DraftCheck } from "./types";
 
-/** Field limits the prompt asks for; checked here, never auto-fixed. */
-export const DRAFT_LIMITS = {
-  headline: 110,
-  seoTitle: 60,
-  seoDescription: 155,
-  bodyWordsMin: 150,
-  bodyWordsMax: 300,
-  summarySentencesMax: 2,
-  tagsMin: 2,
-  tagsMax: 5,
-} as const;
+import { DRAFT_LIMITS } from "./draft-limits";
+
+export { DRAFT_LIMITS };
 
 /** A shared run of this many consecutive words counts as copying. */
 const COPY_WORDS = 12;

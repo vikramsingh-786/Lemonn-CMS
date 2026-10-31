@@ -1,22 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { CircleCheck, CircleX, FileText, RotateCw, Send, TriangleAlert } from "lucide-react";
+import { CircleCheck, CircleX, FileText, PenLine, RotateCw, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { STATUS_LABEL, type ArticleStatus, type ArticleSummary } from "@/features/articles/types";
 import type { DraftCheck, ResearchDraft } from "@/features/research/types";
 import { cn } from "@/lib/utils";
 import { formatIst } from "./format";
 import { SourceLink } from "./status";
 
-type Filter = "all" | "draft" | "ready" | "published";
+type Filter = "all" | ArticleStatus;
 
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "draft", label: "Drafts" },
-  { value: "ready", label: "Ready to Publish" },
-  { value: "published", label: "Published" },
+  { value: "draft", label: "In editing" },
+  { value: "ready", label: "Ready to publish" },
+  { value: "rejected", label: "Rejected" },
 ];
 
 const CHECK_LABEL: Record<DraftCheck["check"], string> = {
@@ -31,7 +32,12 @@ type ArticleReviewProps = {
   drafts: readonly ResearchDraft[];
   /** True once a research run has finished (even with zero drafts). */
   hasRun: boolean;
-  onPublish: (draft: ResearchDraft) => void;
+  /** The editor's article for each draft that has one, by candidateId. */
+  articles: Readonly<Record<string, ArticleSummary>>;
+  /** Opens the draft in the article editor (creating the article the first time). */
+  onEdit: (draft: ResearchDraft) => void;
+  /** Draft id whose editor is being opened. */
+  opening: string | null;
   /** Queued stories without a draft (failed or not tried) and why. */
   pending: readonly { headline: string; reason: string }[];
   onRetryDrafts: () => void;
@@ -42,16 +48,20 @@ type ArticleReviewProps = {
 export function ArticleReview({
   drafts,
   hasRun,
-  onPublish,
+  articles,
+  onEdit,
+  opening,
   pending,
   onRetryDrafts,
   busy,
 }: ArticleReviewProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [openId, setOpenId] = useState<string | null>(null);
-  // AI drafts always start as drafts; only a human editor could make one "ready" (Step 8).
-  const countFor = (value: Filter) => (value === "all" || value === "draft" ? drafts.length : 0);
-  const visible = countFor(filter) > 0 ? drafts : [];
+  // A draft without an article is still "in editing"; an editor moves articles to ready/rejected.
+  const statusOf = (d: ResearchDraft): ArticleStatus => articles[d.candidateId]?.status ?? "draft";
+  const countFor = (value: Filter) =>
+    value === "all" ? drafts.length : drafts.filter((d) => statusOf(d) === value).length;
+  const visible = filter === "all" ? drafts : drafts.filter((d) => statusOf(d) === filter);
   const open = drafts.find((d) => d.id === openId) ?? null;
 
   return (
@@ -116,7 +126,14 @@ export function ArticleReview({
       ) : (
         <ul className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
           {visible.map((draft) => (
-            <DraftCard key={draft.id} draft={draft} onOpen={() => setOpenId(draft.id)} />
+            <DraftCard
+              key={draft.id}
+              draft={draft}
+              article={articles[draft.candidateId]}
+              opening={opening === draft.id}
+              onOpen={() => setOpenId(draft.id)}
+              onEdit={() => onEdit(draft)}
+            />
           ))}
         </ul>
       )}
@@ -132,14 +149,9 @@ export function ArticleReview({
               <Button variant="outline" onClick={() => setOpenId(null)}>
                 Close
               </Button>
-              <Button
-                onClick={() => {
-                  setOpenId(null);
-                  onPublish(open);
-                }}
-              >
-                <Send aria-hidden />
-                Publish
+              <Button onClick={() => onEdit(open)} disabled={opening === open.id}>
+                <PenLine aria-hidden />
+                {opening === open.id ? "Opening…" : "Edit article"}
               </Button>
             </>
           ) : undefined
@@ -162,26 +174,60 @@ function ReadinessBadge({ draft }: { draft: ResearchDraft }) {
   );
 }
 
-function DraftCard({ draft, onOpen }: { draft: ResearchDraft; onOpen: () => void }) {
+function DraftCard({
+  draft,
+  article,
+  opening,
+  onOpen,
+  onEdit,
+}: {
+  draft: ResearchDraft;
+  article: ArticleSummary | undefined;
+  opening: boolean;
+  onOpen: () => void;
+  onEdit: () => void;
+}) {
   return (
     <li className="flex min-w-0 flex-col gap-2.5 rounded-2xl border border-border bg-background/40 p-4 text-sm">
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <Badge variant="outline">AI draft</Badge>
+        {article ? (
+          <Badge
+            variant={
+              article.status === "ready"
+                ? "success"
+                : article.status === "rejected"
+                  ? "neutral"
+                  : "warning"
+            }
+          >
+            {STATUS_LABEL[article.status]}
+          </Badge>
+        ) : (
+          <Badge variant="outline">AI draft</Badge>
+        )}
         <ReadinessBadge draft={draft} />
         <Badge variant="neutral">
           {draft.verificationStatus === "verified" ? "Verified" : "Partially verified"}
         </Badge>
         <Badge variant="outline">{draft.category}</Badge>
       </div>
-      <h3 className="line-clamp-3 leading-snug font-semibold">{draft.headline}</h3>
+      <h3 className="line-clamp-3 leading-snug font-semibold">
+        {article?.headline ?? draft.headline}
+      </h3>
       <p className="line-clamp-3 text-xs text-muted-foreground">{draft.summary}</p>
-      <div className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3 text-xs">
+      <div className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-xs">
         <span className="text-muted-foreground">
           {draft.publisher} · {formatIst(draft.sourcePublishedAt)}
         </span>
-        <Button variant="outline" size="sm" onClick={onOpen}>
-          View details
-        </Button>
+        <div className="flex shrink-0 gap-2">
+          <Button variant="outline" size="sm" onClick={onOpen}>
+            Details
+          </Button>
+          <Button size="sm" onClick={onEdit} disabled={opening}>
+            <PenLine aria-hidden />
+            {opening ? "Opening…" : "Edit"}
+          </Button>
+        </div>
       </div>
     </li>
   );

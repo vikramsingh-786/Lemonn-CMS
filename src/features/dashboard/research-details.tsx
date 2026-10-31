@@ -59,7 +59,7 @@ export function ResearchDetails({ runId }: { runId: string }) {
 
       {run && (
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start">
-          <aside className="flex flex-col gap-5 xl:sticky xl:top-24 xl:order-last">
+          <aside className="flex min-w-0 flex-col gap-5 xl:sticky xl:top-24 xl:order-last">
             <ResearchFeed run={run} />
           </aside>
           <div className="flex min-w-0 flex-col gap-5">

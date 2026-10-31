@@ -37,8 +37,18 @@ and their official evidence only, then runs deterministic checks (`draft-checks.
 stories; the step loop then runs it.
 The source list is fixed in `src/features/dashboard/data.ts` (on/off per browser tab).
 
-Not built yet: auth, a background worker (runs advance only while the dashboard is open),
-source management, draft editing/approval, publishing and the audit log.
+Editing: an editor opens a draft from the dashboard (`Edit`), which creates an `Article` row: a
+working copy of the AI draft (the run's draft stays untouched). `/articles` lists articles across
+runs; `/articles/[id]` is the editor (`src/features/articles/`): headline, summary, a Markdown
+subset body (headings, lists, quotes, bold, italic, rendered as React elements, never raw HTML),
+SEO fields, category and tags, beside a fact sheet of the story's claims and evidence. Every save
+re-runs the draft checks against the story's evidence (`checkArticle`). Status: `draft` →
+`ready` (figures, copying and advice checks must pass; a partially verified story also needs the
+editor's confirmation) or `rejected`; editing a ready article returns it to `draft`. Saves carry
+a `version`, so a stale tab gets 409 instead of overwriting.
+
+Not built yet: per-user accounts, a background worker (runs advance only while the dashboard is open),
+source management, publishing and the audit log.
 
 ## System boundaries
 
