@@ -120,10 +120,11 @@ export function ResearchProgress({ run }: { run: ResearchRun }) {
           </h3>
           <ul className="mt-2 grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2">
             {run.coverage.map((c) => (
-              <li key={c.sourceId} className="flex items-center gap-2">
+              <li key={c.sourceId} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 {COVERAGE_ICON[c.status]}
-                <span className="truncate">{c.name}</span>
-                <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
+                <span className="min-w-0 truncate">{c.name}</span>
+                {/* Wraps under the name on narrow screens instead of widening the page. */}
+                <span className="ml-auto text-xs text-muted-foreground tabular-nums">
                   {c.status === "failed"
                     ? (c.message ?? "discovery failed")
                     : `${c.method === "sitemap" ? "Sitemap" : "Tavily"} · ${c.kept} kept · ${c.offTopic} off-topic · ${c.inWindow} in window`}

@@ -91,7 +91,7 @@ export function Dashboard() {
 
       {/* Main column + sticky right panel (stacks on smaller screens). */}
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start">
-        <aside className="flex flex-col gap-5 xl:sticky xl:top-24 xl:order-last">
+        <aside className="flex min-w-0 flex-col gap-5 xl:sticky xl:top-24 xl:order-last">
           <ResearchPanel
             status={status}
             run={run}

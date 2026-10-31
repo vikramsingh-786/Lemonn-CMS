@@ -7,15 +7,21 @@ import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { cn } from "@/lib/utils";
 
 const PILL =
-  "pill-raised flex items-center gap-2.5 rounded-full bg-card py-1.5 pr-4 pl-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
+  "pill-raised flex shrink-0 items-center gap-2.5 rounded-full bg-card py-1.5 pr-1.5 pl-1.5 transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
 
 export function Header() {
   return (
     <header className="header-surface sticky top-0 z-40">
       <div className="mx-auto flex max-w-[1600px] items-center gap-2 px-3 py-3 sm:gap-3 sm:px-6">
-        <Link href="/" className={PILL}>
+        <Link
+          href="/"
+          aria-label="Lemonn Newsroom dashboard"
+          // Very narrow phones (< 360 px): the Dashboard icon links home, so the logo makes room.
+          className={cn(PILL, "max-[359px]:hidden sm:pr-4")}
+        >
           <BrandMark />
-          <span className="flex flex-col leading-tight">
+          {/* Phones show only the logo, so the nav icons fit beside it. */}
+          <span className="hidden flex-col leading-tight sm:flex">
             <span className="font-display text-sm font-semibold tracking-tight">
               Lemonn Newsroom
             </span>
@@ -32,7 +38,8 @@ export function Header() {
                   aria-current={current ? "page" : undefined}
                   className={cn(
                     PILL,
-                    "text-sm whitespace-nowrap text-muted-foreground hover:text-foreground aria-[current=page]:text-foreground",
+                    // Labels show from laptop width; phones and tablets get icon-only pills.
+                    "text-sm whitespace-nowrap lg:pr-4 text-muted-foreground hover:text-foreground aria-[current=page]:text-foreground",
                   )}
                 >
                   <span
@@ -43,8 +50,8 @@ export function Header() {
                   >
                     <Icon aria-hidden className="size-4" />
                   </span>
-                  <span className="hidden sm:inline">{label}</span>
-                  <span className="sr-only sm:hidden">{label}</span>
+                  <span className="hidden lg:inline">{label}</span>
+                  <span className="sr-only lg:hidden">{label}</span>
                 </Link>
               </li>
             ))}
