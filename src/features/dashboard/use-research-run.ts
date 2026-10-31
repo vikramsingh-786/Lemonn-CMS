@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type {
   ApiErrorBody,
   CurrentRunResponse,
@@ -23,13 +24,24 @@ async function readError(response: Response, fallback: string): Promise<string> 
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** How often a read-only viewer refreshes a run it is watching. */
+const WATCH_MS = 3_000;
+
+/** Sign-in URL that comes back to this page (after a 401: the session ended). */
+function loginUrl() {
+  const here = window.location.pathname + window.location.search;
+  return `/login?expired=1&next=${encodeURIComponent(here)}`;
+}
+
 /**
  * One research run as seen by a page: load it, start it, retry a stage, and drive it to the end.
  * Each POST /step does one bounded piece of work on the server and returns the saved snapshot.
  * Any open page drives an unfinished run (the dashboard and the research page alike); the
  * server's per-run lock makes a second page wait (409) and show the other's progress instead.
+ * `canRun` false (read-only role): the page only watches (polls) a run and never drives it, so
+ * it can't spend API credits. A 401 sends the editor to sign in and back here.
  */
-export function useResearchRun() {
+export function useResearchRun(canRun = true) {
   const [run, setRun] = useState<ResearchRun | null>(null);
   const [status, setStatus] = useState<ResearchStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +54,8 @@ export function useResearchRun() {
   const stopped = useRef(false);
   /** Cancel clicked while the run was still being created (no Run ID yet): done once it exists. */
   const cancelPending = useRef(false);
+  const router = useRouter();
+  const toLogin = useCallback(() => router.push(loginUrl()), [router]);
 
   useEffect(() => {
     mounted.current = true;
@@ -56,53 +70,59 @@ export function useResearchRun() {
     setStatus("error");
   }, []);
 
-  const follow = useCallback(async (runId: string) => {
-    const startedAt = Date.now();
-    let failures = 0;
-    current.current = runId;
-    stopped.current = false;
-    while (mounted.current && !stopped.current) {
-      if (Date.now() - startedAt > MAX_RUN_MS) {
-        throw new Error("Research is taking too long. Reopen this run later to continue.");
-      }
-      const response = await fetch(`/api/research/${runId}/step`, { method: "POST" }).catch(
-        () => null,
-      );
-      if (response?.status === 409) {
-        // Another tab or request is working on this run: show its progress and wait.
-        await sleep(BUSY_WAIT_MS);
-        const snapshot = await fetch(`/api/research/${runId}`).catch(() => null);
-        if (snapshot?.ok && mounted.current) setRun((await snapshot.json()) as ResearchRun);
-        continue;
-      }
-      if (!response?.ok) {
-        if (response?.status === 404)
-          throw new Error(await readError(response, "The run was lost."));
-        if (++failures >= MAX_STEP_FAILURES) {
-          throw new Error(
-            "Lost contact with the server while researching. Reopen the run to continue.",
-          );
+  const follow = useCallback(
+    async (runId: string) => {
+      const startedAt = Date.now();
+      let failures = 0;
+      current.current = runId;
+      stopped.current = false;
+      while (mounted.current && !stopped.current) {
+        if (Date.now() - startedAt > MAX_RUN_MS) {
+          throw new Error("Research is taking too long. Reopen this run later to continue.");
         }
-        await sleep(BUSY_WAIT_MS);
-        continue;
+        const response = canRun
+          ? await fetch(`/api/research/${runId}/step`, { method: "POST" }).catch(() => null)
+          : await sleep(WATCH_MS).then(() => fetch(`/api/research/${runId}`).catch(() => null));
+        if (response?.status === 401) return toLogin();
+        if (response?.status === 403)
+          throw new Error(await readError(response, "Your role can't run research."));
+        if (response?.status === 409) {
+          // Another tab or request is working on this run: show its progress and wait.
+          await sleep(BUSY_WAIT_MS);
+          const snapshot = await fetch(`/api/research/${runId}`).catch(() => null);
+          if (snapshot?.ok && mounted.current) setRun((await snapshot.json()) as ResearchRun);
+          continue;
+        }
+        if (!response?.ok) {
+          if (response?.status === 404)
+            throw new Error(await readError(response, "The run was lost."));
+          if (++failures >= MAX_STEP_FAILURES) {
+            throw new Error(
+              "Lost contact with the server while researching. Reopen the run to continue.",
+            );
+          }
+          await sleep(BUSY_WAIT_MS);
+          continue;
+        }
+        failures = 0;
+        const snapshot = (await response.json()) as ResearchRun;
+        // Cancelled while this step ran: keep the cancelled snapshot that cancel() showed.
+        if (!mounted.current || stopped.current) return;
+        setRun(snapshot);
+        if (snapshot.stage === "cancelled") {
+          setStatus("cancelled");
+          return;
+        }
+        if (snapshot.stage === "failed")
+          throw new Error(snapshot.error?.message ?? "Research failed.");
+        if (snapshot.stage === "completed") {
+          setStatus("done");
+          return;
+        }
       }
-      failures = 0;
-      const snapshot = (await response.json()) as ResearchRun;
-      // Cancelled while this step ran: keep the cancelled snapshot that cancel() showed.
-      if (!mounted.current || stopped.current) return;
-      setRun(snapshot);
-      if (snapshot.stage === "cancelled") {
-        setStatus("cancelled");
-        return;
-      }
-      if (snapshot.stage === "failed")
-        throw new Error(snapshot.error?.message ?? "Research failed.");
-      if (snapshot.stage === "completed") {
-        setStatus("done");
-        return;
-      }
-    }
-  }, []);
+    },
+    [canRun, toLogin],
+  );
 
   /** Shows a saved run and keeps driving it if it is unfinished. False when it doesn't exist. */
   const load = useCallback(
@@ -113,6 +133,10 @@ export function useResearchRun() {
       }
       const response = await fetch(`/api/research/${runId}`).catch(() => null);
       if (!mounted.current) return false;
+      if (response?.status === 401) {
+        toLogin();
+        return false;
+      }
       if (!response?.ok) {
         setNotFound(true);
         return false;
@@ -131,7 +155,7 @@ export function useResearchRun() {
       }
       return true;
     },
-    [follow, fail],
+    [follow, fail, toLogin],
   );
 
   /** Cancels `runId` on the server; if it finished meanwhile, shows it as it finished. */
@@ -141,6 +165,7 @@ export function useResearchRun() {
         () => null,
       );
       if (!mounted.current) return;
+      if (response?.status === 401) return toLogin();
       if (response?.ok) {
         setRun((await response.json()) as ResearchRun);
         setError(null);
@@ -150,7 +175,7 @@ export function useResearchRun() {
         await load(runId);
       }
     },
-    [load],
+    [load, toLogin],
   );
 
   /**
@@ -182,6 +207,7 @@ export function useResearchRun() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sources }),
         });
+        if (response.status === 401) return toLogin();
         if (response.status === 409) {
           // A run is already going (another tab, a refresh, another editor): show it and keep it
           // moving instead of leaving the editor at a dead end.
@@ -209,7 +235,7 @@ export function useResearchRun() {
         fail(e);
       }
     },
-    [follow, fail, cancelOnServer, load],
+    [follow, fail, cancelOnServer, load, toLogin],
   );
 
   /**
@@ -218,15 +244,23 @@ export function useResearchRun() {
    */
   const loadCurrent = useCallback(async (): Promise<string | null> => {
     const response = await fetch("/api/research").catch(() => null);
+    if (response?.status === 401) {
+      toLogin();
+      return null;
+    }
     if (!response?.ok || !mounted.current) return null;
     const { activeRunId, latestRunId } = (await response.json()) as CurrentRunResponse;
     const runId = activeRunId ?? latestRunId;
     if (!runId) return null;
     if (activeRunId)
-      setNotice("Research in progress: showing it and continuing where it left off.");
+      setNotice(
+        canRun
+          ? "Research in progress: showing it and continuing where it left off."
+          : "Research in progress: you're watching it (read-only); it advances while a team member has it open.",
+      );
     void load(runId);
     return runId;
-  }, [load]);
+  }, [load, canRun, toLogin]);
 
   /**
    * Re-runs one stage of the current run (same Run ID): "verify" re-verifies failed / unfinished
@@ -239,6 +273,7 @@ export function useResearchRun() {
       setError(null);
       try {
         const response = await fetch(`/api/research/${run.runId}/${stage}`, { method: "POST" });
+        if (response.status === 401) return toLogin();
         if (!response.ok)
           throw new Error(await readError(response, `Retry failed (${response.status}).`));
         await follow(run.runId);
@@ -246,7 +281,7 @@ export function useResearchRun() {
         fail(e);
       }
     },
-    [run, follow, fail],
+    [run, follow, fail, toLogin],
   );
 
   return {

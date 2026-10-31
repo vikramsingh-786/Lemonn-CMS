@@ -7,7 +7,7 @@ Guidance for Claude Code when working in this repository.
 Lemonn News CMS: a standalone internal CMS that will become Lemonn's AI-assisted financial news tool.
 **Current status: research pipeline prototype.** The dashboard runs discovery, ranking, claim verification and
 drafting; editors edit drafts as articles and mark them ready. Data is in PostgreSQL, behind a
-password sign-in. No background worker or publishing yet.
+per-user accounts with roles (admin, team, read-only). No background worker or publishing yet.
 
 See [docs/architecture.md](docs/architecture.md) and [docs/development.md](docs/development.md).
 

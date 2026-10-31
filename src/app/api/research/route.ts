@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireApiSession } from "@/lib/session";
+import { requireApi } from "@/lib/auth";
 import { DEFAULT_SOURCES } from "@/features/dashboard/data";
 import { needsTavily, newRun } from "@/features/research/discovery";
 import { activeRunId, createRun, latestRunId } from "@/features/research/run-store";
@@ -36,8 +36,8 @@ function error(
  * another device) can show and resume the current research instead of looking idle.
  */
 export async function GET() {
-  const denied = await requireApiSession();
-  if (denied) return denied;
+  const auth = await requireApi();
+  if (auth.denied) return auth.denied;
   const [active, latest] = await Promise.all([activeRunId(), latestRunId()]);
   const body: CurrentRunResponse = { activeRunId: active, latestRunId: latest };
   return Response.json(body, { headers: { "Cache-Control": "no-store" } });
@@ -45,8 +45,8 @@ export async function GET() {
 
 /** Validate the request and create the run; the dashboard then drives it with /step requests. */
 export async function POST(request: Request) {
-  const denied = await requireApiSession();
-  if (denied) return denied;
+  const auth = await requireApi("research:run");
+  if (auth.denied) return auth.denied;
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return error(400, "invalid_request", "Invalid research request.");
 
@@ -83,8 +83,12 @@ export async function POST(request: Request) {
   }
   const end = new Date();
   const start = new Date(end.getTime() - WINDOW_HOURS * 3_600_000);
-  const run = newRun(enabled, { start: start.toISOString(), end: end.toISOString() });
-  await createRun(run);
+  const run = newRun(
+    enabled,
+    { start: start.toISOString(), end: end.toISOString() },
+    auth.user.name,
+  );
+  await createRun(run, auth.user.id);
   const body: StartRunResponse = { runId: run.runId };
   return Response.json(body, { status: 202, headers: { "Cache-Control": "no-store" } });
 }

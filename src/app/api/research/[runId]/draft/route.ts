@@ -1,5 +1,5 @@
 import { prepareDraftRetry } from "@/features/research/pipeline";
-import { requireApiSession } from "@/lib/session";
+import { requireApi } from "@/lib/auth";
 import { getRun, saveRun } from "@/features/research/run-store";
 import type { ApiErrorBody, StartRunResponse } from "@/features/research/types";
 
@@ -9,8 +9,8 @@ import type { ApiErrorBody, StartRunResponse } from "@/features/research/types";
  * Prepares the run; the dashboard then drives it with POST /api/research/[runId]/step.
  */
 export async function POST(_request: Request, ctx: RouteContext<"/api/research/[runId]/draft">) {
-  const denied = await requireApiSession();
-  if (denied) return denied;
+  const auth = await requireApi("research:run");
+  if (auth.denied) return auth.denied;
   const { runId } = await ctx.params;
   const run = await getRun(runId);
   const blocked = run ? prepareDraftRetry(run) : "Research run not found.";

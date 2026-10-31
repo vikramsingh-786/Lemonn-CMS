@@ -1,12 +1,12 @@
 import { connection } from "next/server";
-import { requireApiSession } from "@/lib/session";
+import { requireApi } from "@/lib/auth";
 import { getRun } from "@/features/research/run-store";
 import type { ApiErrorBody } from "@/features/research/types";
 
 /** Snapshot of a research run from the database (no evidence passages). */
 export async function GET(_request: Request, ctx: RouteContext<"/api/research/[runId]">) {
-  const denied = await requireApiSession();
-  if (denied) return denied;
+  const auth = await requireApi();
+  if (auth.denied) return auth.denied;
   await connection();
   const { runId } = await ctx.params;
   const run = await getRun(runId);

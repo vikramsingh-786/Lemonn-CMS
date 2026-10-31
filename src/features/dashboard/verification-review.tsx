@@ -31,7 +31,8 @@ export function VerificationReview({
   retrying,
 }: {
   run: ResearchRun;
-  onRetry: () => void;
+  /** Absent for read-only roles: no Retry button. */
+  onRetry?: () => void;
   retrying: boolean;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
@@ -63,7 +64,7 @@ export function VerificationReview({
             {notProcessed > 0 && ` ${notProcessed} stories were not processed.`}
           </p>
         </div>
-        {toRetry > 0 && (
+        {toRetry > 0 && onRetry && (
           <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying}>
             <RotateCw aria-hidden />
             Retry {toRetry} failed / unfinished

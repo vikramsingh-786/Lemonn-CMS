@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { CircleCheck, CircleX, FileText, PenLine, RotateCw, TriangleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,10 @@ type ArticleReviewProps = {
   onEdit: (draft: ResearchDraft) => void;
   /** Draft id whose editor is being opened. */
   opening: string | null;
+  /** The role may edit articles (else: view existing articles only). */
+  canEdit: boolean;
+  /** The role may run research (retry drafting). */
+  canRun: boolean;
   /** Queued stories without a draft (failed or not tried) and why. */
   pending: readonly { headline: string; reason: string }[];
   onRetryDrafts: () => void;
@@ -54,6 +59,8 @@ export function ArticleReview({
   articles,
   onEdit,
   opening,
+  canEdit,
+  canRun,
   pending,
   onRetryDrafts,
   busy,
@@ -84,7 +91,7 @@ export function ArticleReview({
               by rules. Every draft needs human review; nothing is published.
             </p>
           </div>
-          {pending.length > 0 && hasRun && (
+          {pending.length > 0 && hasRun && canRun && (
             <Button variant="outline" size="sm" onClick={onRetryDrafts} disabled={busy}>
               <RotateCw aria-hidden />
               Draft {pending.length} remaining
@@ -134,6 +141,7 @@ export function ArticleReview({
               draft={draft}
               article={articles[draft.candidateId]}
               opening={opening === draft.id}
+              canEdit={canEdit}
               onOpen={() => setOpenId(draft.id)}
               onEdit={() => onEdit(draft)}
             />
@@ -152,10 +160,12 @@ export function ArticleReview({
               <Button variant="outline" onClick={() => setOpenId(null)}>
                 Close
               </Button>
-              <Button onClick={() => onEdit(open)} disabled={opening === open.id}>
-                <PenLine aria-hidden />
-                {opening === open.id ? "Opening…" : "Edit article"}
-              </Button>
+              {canEdit && (
+                <Button onClick={() => onEdit(open)} disabled={opening === open.id}>
+                  <PenLine aria-hidden />
+                  {opening === open.id ? "Opening…" : "Edit article"}
+                </Button>
+              )}
             </>
           ) : undefined
         }
@@ -181,12 +191,14 @@ function DraftCard({
   draft,
   article,
   opening,
+  canEdit,
   onOpen,
   onEdit,
 }: {
   draft: ResearchDraft;
   article: ArticleSummary | undefined;
   opening: boolean;
+  canEdit: boolean;
   onOpen: () => void;
   onEdit: () => void;
 }) {
@@ -226,10 +238,21 @@ function DraftCard({
           <Button variant="outline" size="sm" onClick={onOpen}>
             Details
           </Button>
-          <Button size="sm" onClick={onEdit} disabled={opening}>
-            <PenLine aria-hidden />
-            {opening ? "Opening…" : "Edit"}
-          </Button>
+          {canEdit ? (
+            <Button size="sm" onClick={onEdit} disabled={opening}>
+              <PenLine aria-hidden />
+              {opening ? "Opening…" : "Edit"}
+            </Button>
+          ) : (
+            article && (
+              <Link
+                href={`/articles/${article.id}`}
+                className="pill-raised inline-flex h-9 items-center rounded-full bg-muted px-4 text-xs font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                View
+              </Link>
+            )
+          )}
         </div>
       </div>
     </li>

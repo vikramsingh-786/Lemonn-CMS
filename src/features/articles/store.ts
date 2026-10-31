@@ -5,6 +5,9 @@ import { getRun, isRunId, loadEvidence } from "@/features/research/run-store";
 import { TOPICS } from "@/features/research/topics";
 import type { DraftCheck, ResearchRun } from "@/features/research/types";
 import type { Article as ArticleRow } from "@/generated/prisma/client";
+
+type Row = ArticleRow & { updatedBy: { name: string } | null };
+const WITH_EDITOR = { updatedBy: { select: { name: true } } } as const;
 import { db } from "@/lib/db";
 import {
   BLOCKING_CHECKS,
@@ -34,7 +37,7 @@ export const saveSchema = z
   })
   .strict();
 
-function toArticle(row: ArticleRow): Article {
+function toArticle(row: Row): Article {
   return {
     id: row.id,
     runId: row.runId,
@@ -51,6 +54,7 @@ function toArticle(row: ArticleRow): Article {
     version: row.version,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    updatedByName: row.updatedBy?.name ?? null,
   };
 }
 
@@ -90,12 +94,17 @@ export async function checkArticle(
 }
 
 /** The article for a draft, created from the AI draft on first use. Null when there's no draft. */
-export async function articleForDraft(runId: string, candidateId: string): Promise<Article | null> {
+export async function articleForDraft(
+  runId: string,
+  candidateId: string,
+  userId: string,
+): Promise<Article | null> {
   if (!isRunId(runId)) return null;
   const existing = await db().researchRun.findFirst({ where: { id: runId }, select: { id: true } });
   if (!existing) return null;
   const found = await db().article.findUnique({
     where: { runId_candidateId: { runId, candidateId } },
+    include: WITH_EDITOR,
   });
   if (found) return toArticle(found);
   const run = await getRun(runId);
@@ -115,13 +124,21 @@ export async function articleForDraft(runId: string, candidateId: string): Promi
   // (runId, candidateId) constraint and reads the winner's article instead.
   try {
     const row = await db().article.create({
-      data: { runId, candidateId, ...fields, checks: checks as unknown as object },
+      data: {
+        runId,
+        candidateId,
+        ...fields,
+        checks: checks as unknown as object,
+        updatedById: userId,
+      },
+      include: WITH_EDITOR,
     });
     return toArticle(row);
   } catch (e) {
     if ((e as { code?: string }).code !== "P2002") throw e;
     const row = await db().article.findUnique({
       where: { runId_candidateId: { runId, candidateId } },
+      include: WITH_EDITOR,
     });
     return row ? toArticle(row) : null;
   }
@@ -129,7 +146,7 @@ export async function articleForDraft(runId: string, candidateId: string): Promi
 
 export async function getArticle(id: string): Promise<Article | null> {
   if (!ID.test(id)) return null;
-  const row = await db().article.findUnique({ where: { id } });
+  const row = await db().article.findUnique({ where: { id }, include: WITH_EDITOR });
   return row ? toArticle(row) : null;
 }
 
@@ -148,12 +165,14 @@ export async function listArticles(runId?: string): Promise<ArticleSummary[]> {
       headline: true,
       category: true,
       updatedAt: true,
+      updatedBy: { select: { name: true } },
     },
   });
-  return rows.map((r) => ({
+  return rows.map(({ updatedBy, ...r }) => ({
     ...r,
     status: r.status as ArticleStatus,
     updatedAt: r.updatedAt.toISOString(),
+    updatedByName: updatedBy?.name ?? null,
   }));
 }
 
@@ -186,7 +205,7 @@ export type SaveResult =
  * "ready" needs the blocking checks (figures, copying, advice) passing, and for a partially verified story the editor's confirmation
  * that they checked those claims; changing a ready article's text sends it back to editing.
  */
-export async function saveArticle(id: string, input: unknown): Promise<SaveResult> {
+export async function saveArticle(id: string, input: unknown, userId: string): Promise<SaveResult> {
   const parsed = saveSchema.safeParse(input);
   if (!parsed.success)
     return { ok: false, status: 400, message: "Invalid article: check every field." };
@@ -235,6 +254,7 @@ export async function saveArticle(id: string, input: unknown): Promise<SaveResul
       status: next,
       checks: checks as unknown as object,
       version: { increment: 1 },
+      updatedById: userId,
     },
   });
   if (count === 0)

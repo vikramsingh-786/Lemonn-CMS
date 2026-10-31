@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Bold,
@@ -92,14 +93,31 @@ const slug = (s: string) =>
     .slice(0, 60);
 
 /** Full-page editor for one article: text, format, SEO, checks and the story's fact sheet. */
-export function ArticleEditor({ initial, context }: { initial: Article; context: ArticleContext }) {
+/** Unsaved text kept in this browser while the editor signs in again (see save()). */
+const stashKey = (id: string) => `lemonn-article-unsaved:${id}`;
+const noSubscribe = () => () => {};
+
+export function ArticleEditor({
+  initial,
+  context,
+  canEdit = true,
+}: {
+  initial: Article;
+  context: ArticleContext;
+  /** False for read-only roles: everything is shown, nothing can be changed. */
+  canEdit?: boolean;
+}) {
   const [saved, setSaved] = useState(initial);
   const [fields, setFields] = useState<ArticleFields>(() => fieldsOf(initial));
-  const [mode, setMode] = useState<"write" | "preview">("write");
+  const [mode, setMode] = useState<"write" | "preview">(canEdit ? "write" : "preview");
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ kind: "error" | "conflict"; text: string } | null>(null);
+  const [message, setMessage] = useState<{
+    kind: "error" | "conflict" | "info";
+    text: string;
+  } | null>(null);
   const [confirmPartial, setConfirmPartial] = useState(false);
   const body = useRef<HTMLTextAreaElement>(null);
+  const router = useRouter();
 
   const dirty = useMemo(
     () => JSON.stringify(fields) !== JSON.stringify(fieldsOf(saved)),
@@ -126,6 +144,17 @@ export function ArticleEditor({ initial, context }: { initial: Article; context:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(request),
         });
+        if (response.status === 401) {
+          // Session ended: keep the text in this browser, sign in, and come back to it.
+          try {
+            localStorage.setItem(
+              stashKey(saved.id),
+              JSON.stringify({ version: saved.version, fields }),
+            );
+          } catch {}
+          router.push(`/login?expired=1&next=${encodeURIComponent(window.location.pathname)}`);
+          return;
+        }
         const data = (await response.json().catch(() => null)) as
           | (Article & { error?: undefined })
           | { error: { message: string }; article?: Article }
@@ -143,15 +172,43 @@ export function ArticleEditor({ initial, context }: { initial: Article; context:
         setSaving(false);
       }
     },
-    [fields, saved.id, saved.version, confirmPartial],
+    [fields, saved.id, saved.version, confirmPartial, router],
   );
+
+  // Back from signing in again: text that couldn't be saved, kept in this browser (read without
+  // an effect; the editor chooses to restore or discard it).
+  const stashRaw = useSyncExternalStore(
+    noSubscribe,
+    () => {
+      try {
+        return localStorage.getItem(stashKey(initial.id));
+      } catch {
+        return null;
+      }
+    },
+    () => null,
+  );
+  const [stashHandled, setStashHandled] = useState(false);
+  const stash = useMemo(() => {
+    try {
+      return stashRaw ? (JSON.parse(stashRaw) as { version: number; fields: ArticleFields }) : null;
+    } catch {
+      return null;
+    }
+  }, [stashRaw]);
+  const dropStash = () => {
+    try {
+      localStorage.removeItem(stashKey(initial.id));
+    } catch {}
+    setStashHandled(true);
+  };
 
   // ⌘S / Ctrl+S saves; leaving with unsaved changes asks first.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        if (!saving) void save();
+        if (!saving && canEdit) void save();
       }
     };
     const onLeave = (e: BeforeUnloadEvent) => {
@@ -163,7 +220,7 @@ export function ArticleEditor({ initial, context }: { initial: Article; context:
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("beforeunload", onLeave);
     };
-  }, [dirty, save, saving]);
+  }, [dirty, save, saving, canEdit]);
 
   function applyEdit(edit: (value: string, start: number, end: number) => Edit) {
     const el = body.current;
@@ -192,9 +249,14 @@ export function ArticleEditor({ initial, context }: { initial: Article; context:
         </Link>
         <StatusBadge status={saved.status} />
         <span aria-live="polite" className="text-xs text-muted-foreground">
-          {saving ? "Saving…" : dirty ? "Unsaved changes" : `Saved ${formatIst(saved.updatedAt)}`}
+          {saving
+            ? "Saving…"
+            : dirty
+              ? "Unsaved changes"
+              : `Saved ${formatIst(saved.updatedAt)}${saved.updatedByName ? ` by ${saved.updatedByName}` : ""}`}
         </span>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        {!canEdit && <Badge variant="neutral">Read-only</Badge>}
+        <div className={cn("ml-auto flex flex-wrap items-center gap-2", !canEdit && "hidden")}>
           <Button
             variant="outline"
             size="sm"
@@ -249,10 +311,39 @@ export function ArticleEditor({ initial, context }: { initial: Article; context:
         </div>
       </div>
 
+      {canEdit && stash && !stashHandled && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-3 rounded-2xl bg-muted px-4 py-3 text-sm"
+        >
+          <span className="min-w-0 flex-1">
+            {stash.version === saved.version
+              ? "You have unsaved changes from before you signed in again."
+              : "You have unsaved changes from before you signed in again, but the article has been saved since. Restoring replaces that newer text."}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setFields(stash.fields);
+              dropStash();
+            }}
+          >
+            Restore
+          </Button>
+          <Button variant="ghost" size="sm" onClick={dropStash}>
+            Discard
+          </Button>
+        </div>
+      )}
+
       {message && (
         <div
-          role="alert"
-          className="flex flex-wrap items-center gap-3 rounded-2xl bg-warning-soft px-4 py-3 text-sm text-warning"
+          role={message.kind === "info" ? "status" : "alert"}
+          className={cn(
+            "flex flex-wrap items-center gap-3 rounded-2xl px-4 py-3 text-sm",
+            message.kind === "info" ? "bg-muted text-foreground" : "bg-warning-soft text-warning",
+          )}
         >
           <TriangleAlert aria-hidden className="size-4 shrink-0" />
           <span className="min-w-0 flex-1">{message.text}</span>
@@ -264,253 +355,256 @@ export function ArticleEditor({ initial, context }: { initial: Article; context:
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-        {/* Writing column */}
-        <section
-          aria-label="Article"
-          className="surface-raised flex min-w-0 flex-col gap-5 rounded-lg border border-border bg-card p-4 sm:p-6"
-        >
-          <Field
-            label="Headline"
-            count={`${fields.headline.length} / ${L.headline}`}
-            over={fields.headline.length > L.headline}
+      {/* Read-only roles: every field and button inside is disabled by the fieldset. */}
+      <fieldset disabled={!canEdit} className="m-0 min-w-0 border-0 p-0">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+          {/* Writing column */}
+          <section
+            aria-label="Article"
+            className="surface-raised flex min-w-0 flex-col gap-5 rounded-lg border border-border bg-card p-4 sm:p-6"
           >
-            {(id) => (
-              <textarea
-                id={id}
-                rows={2}
-                value={fields.headline}
-                onChange={(e) => set("headline", e.target.value.replace(/\n/g, " "))}
-                className={cn(
-                  FIELD,
-                  "resize-none font-display text-xl font-semibold tracking-tight sm:text-2xl",
-                )}
-              />
-            )}
-          </Field>
-
-          <Field
-            label="Summary"
-            hint="The standfirst under the headline"
-            count={`${sentenceCount(fields.summary)} / ${L.summarySentencesMax} sentences`}
-            over={sentenceCount(fields.summary) > L.summarySentencesMax}
-          >
-            {(id) => (
-              <textarea
-                id={id}
-                rows={3}
-                value={fields.summary}
-                onChange={(e) => set("summary", e.target.value)}
-                className={cn(FIELD, "resize-y")}
-              />
-            )}
-          </Field>
-
-          <div className="flex flex-col gap-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-medium">Body</span>
-              <span
-                className={cn(
-                  "text-xs tabular-nums",
-                  words < L.bodyWordsMin || words > L.bodyWordsMax
-                    ? "text-warning"
-                    : "text-muted-foreground",
-                )}
-              >
-                {words} words · aim for {L.bodyWordsMin}–{L.bodyWordsMax}
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted p-1">
-              <div role="toolbar" aria-label="Formatting" className="flex flex-wrap gap-0.5">
-                {TOOLS.map(({ label, icon: Icon, edit }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    title={label}
-                    aria-label={label}
-                    onClick={() => applyEdit(edit)}
-                    disabled={mode === "preview"}
-                    className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-40"
-                  >
-                    <Icon aria-hidden className="size-4" />
-                  </button>
-                ))}
-              </div>
-              <div role="group" aria-label="View" className="flex gap-0.5">
-                {(["write", "preview"] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    aria-pressed={mode === m}
-                    onClick={() => setMode(m)}
-                    className={cn(
-                      "rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                      mode === m
-                        ? "bg-card text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {mode === "write" ? (
-              <>
+            <Field
+              label="Headline"
+              count={`${fields.headline.length} / ${L.headline}`}
+              over={fields.headline.length > L.headline}
+            >
+              {(id) => (
                 <textarea
-                  ref={body}
-                  aria-label="Body"
-                  rows={20}
-                  value={fields.body}
-                  onChange={(e) => set("body", e.target.value)}
-                  className={cn(FIELD, "min-h-[24rem] resize-y leading-7")}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Blank line between paragraphs · <code>## Heading</code> · <code>- list</code> ·{" "}
-                  <code>**bold**</code> · <code>*italic*</code> · <code>&gt; quote</code>
-                </p>
-              </>
-            ) : (
-              <article className="rounded-xl border border-border bg-background/40 p-4 sm:p-6">
-                <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
-                  {fields.headline}
-                </h1>
-                <p className="mt-3 text-base text-muted-foreground">{fields.summary}</p>
-                <ArticleBody source={fields.body} className="mt-6" />
-              </article>
-            )}
-          </div>
-        </section>
-
-        {/* Side column: checks, SEO, category, fact sheet */}
-        <aside className="flex min-w-0 flex-col gap-5">
-          <Panel
-            title="Checks"
-            note={
-              dirty
-                ? "Showing the last save; unsaved edits are checked when you save."
-                : "Re-checked on every save."
-            }
-          >
-            <ul className="space-y-1.5 text-sm">
-              {saved.checks.map((c) => (
-                <li key={c.check} className="flex items-start gap-2">
-                  {c.passed ? (
-                    <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />
-                  ) : BLOCKING_CHECKS.includes(c.check) ? (
-                    <CircleX aria-hidden className="mt-0.5 size-4 shrink-0 text-destructive" />
-                  ) : (
-                    <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
+                  id={id}
+                  rows={2}
+                  value={fields.headline}
+                  onChange={(e) => set("headline", e.target.value.replace(/\n/g, " "))}
+                  className={cn(
+                    FIELD,
+                    "resize-none font-display text-xl font-semibold tracking-tight sm:text-2xl",
                   )}
-                  <span className="min-w-0">
-                    {CHECK_LABEL[c.check]}
-                    {c.note && (
-                      <span className="block text-xs text-muted-foreground">{c.note}</span>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            {saved.status === "draft" && (
-              <div className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">
-                {failing.length > 0 ? (
-                  <p>
-                    Fix the failed checks (red) before marking this article ready. Amber ones are
-                    advice.
-                  </p>
-                ) : (
-                  <p>No blocking issues. Mark ready once you have read it in full.</p>
-                )}
-                {partial && (
-                  <label className="mt-2 flex items-start gap-2 text-foreground">
-                    <input
-                      type="checkbox"
-                      checked={confirmPartial}
-                      onChange={(e) => setConfirmPartial(e.target.checked)}
-                      className="mt-0.5 size-4 accent-[var(--primary)]"
-                    />
-                    <span>I have checked the partially verified claims in the fact sheet.</span>
-                  </label>
-                )}
-              </div>
-            )}
-          </Panel>
+                />
+              )}
+            </Field>
 
-          <Panel title="Search & SEO">
-            <div className="flex flex-col gap-3">
-              <Field
-                label="SEO title"
-                count={`${fields.seoTitle.length} / ${L.seoTitle}`}
-                over={fields.seoTitle.length > L.seoTitle}
-              >
-                {(id) => (
-                  <input
-                    id={id}
-                    value={fields.seoTitle}
-                    onChange={(e) => set("seoTitle", e.target.value)}
-                    className={FIELD}
-                  />
-                )}
-              </Field>
-              <Field
-                label="SEO description"
-                count={`${fields.seoDescription.length} / ${L.seoDescription}`}
-                over={fields.seoDescription.length > L.seoDescription}
-              >
-                {(id) => (
+            <Field
+              label="Summary"
+              hint="The standfirst under the headline"
+              count={`${sentenceCount(fields.summary)} / ${L.summarySentencesMax} sentences`}
+              over={sentenceCount(fields.summary) > L.summarySentencesMax}
+            >
+              {(id) => (
+                <textarea
+                  id={id}
+                  rows={3}
+                  value={fields.summary}
+                  onChange={(e) => set("summary", e.target.value)}
+                  className={cn(FIELD, "resize-y")}
+                />
+              )}
+            </Field>
+
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-sm font-medium">Body</span>
+                <span
+                  className={cn(
+                    "text-xs tabular-nums",
+                    words < L.bodyWordsMin || words > L.bodyWordsMax
+                      ? "text-warning"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {words} words · aim for {L.bodyWordsMin}–{L.bodyWordsMax}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted p-1">
+                <div role="toolbar" aria-label="Formatting" className="flex flex-wrap gap-0.5">
+                  {TOOLS.map(({ label, icon: Icon, edit }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      title={label}
+                      aria-label={label}
+                      onClick={() => applyEdit(edit)}
+                      disabled={mode === "preview"}
+                      className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-40"
+                    >
+                      <Icon aria-hidden className="size-4" />
+                    </button>
+                  ))}
+                </div>
+                <div role="group" aria-label="View" className="flex gap-0.5">
+                  {(["write", "preview"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      aria-pressed={mode === m}
+                      onClick={() => setMode(m)}
+                      className={cn(
+                        "rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                        mode === m
+                          ? "bg-card text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {mode === "write" ? (
+                <>
                   <textarea
-                    id={id}
-                    rows={3}
-                    value={fields.seoDescription}
-                    onChange={(e) => set("seoDescription", e.target.value)}
-                    className={cn(FIELD, "resize-none")}
+                    ref={body}
+                    aria-label="Body"
+                    rows={20}
+                    value={fields.body}
+                    onChange={(e) => set("body", e.target.value)}
+                    className={cn(FIELD, "min-h-[24rem] resize-y leading-7")}
                   />
-                )}
-              </Field>
-              {/* How the article would look in search results. */}
-              <div className="rounded-xl bg-muted p-3">
-                <p className="text-[11px] text-muted-foreground">Search preview</p>
-                <p className="mt-1 truncate text-xs text-muted-foreground">
-                  lemonn.co.in › news › {slug(fields.headline)}
-                </p>
-                <p className="mt-0.5 line-clamp-2 text-base leading-snug text-[#1a0dab] dark:text-[#8ab4f8]">
-                  {fields.seoTitle || fields.headline}
-                </p>
-                <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                  {fields.seoDescription}
-                </p>
+                  <p className="text-xs text-muted-foreground">
+                    Blank line between paragraphs · <code>## Heading</code> · <code>- list</code> ·{" "}
+                    <code>**bold**</code> · <code>*italic*</code> · <code>&gt; quote</code>
+                  </p>
+                </>
+              ) : (
+                <article className="rounded-xl border border-border bg-background/40 p-4 sm:p-6">
+                  <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
+                    {fields.headline}
+                  </h1>
+                  <p className="mt-3 text-base text-muted-foreground">{fields.summary}</p>
+                  <ArticleBody source={fields.body} className="mt-6" />
+                </article>
+              )}
+            </div>
+          </section>
+
+          {/* Side column: checks, SEO, category, fact sheet */}
+          <aside className="flex min-w-0 flex-col gap-5">
+            <Panel
+              title="Checks"
+              note={
+                dirty
+                  ? "Showing the last save; unsaved edits are checked when you save."
+                  : "Re-checked on every save."
+              }
+            >
+              <ul className="space-y-1.5 text-sm">
+                {saved.checks.map((c) => (
+                  <li key={c.check} className="flex items-start gap-2">
+                    {c.passed ? (
+                      <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />
+                    ) : BLOCKING_CHECKS.includes(c.check) ? (
+                      <CircleX aria-hidden className="mt-0.5 size-4 shrink-0 text-destructive" />
+                    ) : (
+                      <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-warning" />
+                    )}
+                    <span className="min-w-0">
+                      {CHECK_LABEL[c.check]}
+                      {c.note && (
+                        <span className="block text-xs text-muted-foreground">{c.note}</span>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {saved.status === "draft" && (
+                <div className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">
+                  {failing.length > 0 ? (
+                    <p>
+                      Fix the failed checks (red) before marking this article ready. Amber ones are
+                      advice.
+                    </p>
+                  ) : (
+                    <p>No blocking issues. Mark ready once you have read it in full.</p>
+                  )}
+                  {partial && (
+                    <label className="mt-2 flex items-start gap-2 text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={confirmPartial}
+                        onChange={(e) => setConfirmPartial(e.target.checked)}
+                        className="mt-0.5 size-4 accent-[var(--primary)]"
+                      />
+                      <span>I have checked the partially verified claims in the fact sheet.</span>
+                    </label>
+                  )}
+                </div>
+              )}
+            </Panel>
+
+            <Panel title="Search & SEO">
+              <div className="flex flex-col gap-3">
+                <Field
+                  label="SEO title"
+                  count={`${fields.seoTitle.length} / ${L.seoTitle}`}
+                  over={fields.seoTitle.length > L.seoTitle}
+                >
+                  {(id) => (
+                    <input
+                      id={id}
+                      value={fields.seoTitle}
+                      onChange={(e) => set("seoTitle", e.target.value)}
+                      className={FIELD}
+                    />
+                  )}
+                </Field>
+                <Field
+                  label="SEO description"
+                  count={`${fields.seoDescription.length} / ${L.seoDescription}`}
+                  over={fields.seoDescription.length > L.seoDescription}
+                >
+                  {(id) => (
+                    <textarea
+                      id={id}
+                      rows={3}
+                      value={fields.seoDescription}
+                      onChange={(e) => set("seoDescription", e.target.value)}
+                      className={cn(FIELD, "resize-none")}
+                    />
+                  )}
+                </Field>
+                {/* How the article would look in search results. */}
+                <div className="rounded-xl bg-muted p-3">
+                  <p className="text-[11px] text-muted-foreground">Search preview</p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
+                    lemonn.co.in › news › {slug(fields.headline)}
+                  </p>
+                  <p className="mt-0.5 line-clamp-2 text-base leading-snug text-[#1a0dab] dark:text-[#8ab4f8]">
+                    {fields.seoTitle || fields.headline}
+                  </p>
+                  <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                    {fields.seoDescription}
+                  </p>
+                </div>
               </div>
-            </div>
-          </Panel>
+            </Panel>
 
-          <Panel title="Category & tags">
-            <div className="flex flex-col gap-3">
-              <Field label="Category">
-                {(id) => (
-                  <select
-                    id={id}
-                    value={fields.category}
-                    onChange={(e) => set("category", e.target.value)}
-                    className={FIELD}
-                  >
-                    {context.categories.map((c) => (
-                      <option key={c}>{c}</option>
-                    ))}
-                  </select>
-                )}
-              </Field>
-              <TagInput
-                tags={fields.tags}
-                onChange={(tags) => set("tags", tags)}
-                min={L.tagsMin}
-                max={L.tagsMax}
-              />
-            </div>
-          </Panel>
+            <Panel title="Category & tags">
+              <div className="flex flex-col gap-3">
+                <Field label="Category">
+                  {(id) => (
+                    <select
+                      id={id}
+                      value={fields.category}
+                      onChange={(e) => set("category", e.target.value)}
+                      className={FIELD}
+                    >
+                      {context.categories.map((c) => (
+                        <option key={c}>{c}</option>
+                      ))}
+                    </select>
+                  )}
+                </Field>
+                <TagInput
+                  tags={fields.tags}
+                  onChange={(tags) => set("tags", tags)}
+                  min={L.tagsMin}
+                  max={L.tagsMax}
+                />
+              </div>
+            </Panel>
 
-          <FactSheet context={context} />
-        </aside>
-      </div>
+            <FactSheet context={context} />
+          </aside>
+        </div>
+      </fieldset>
     </div>
   );
 }

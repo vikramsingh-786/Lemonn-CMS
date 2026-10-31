@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { LogOut } from "lucide-react";
 import { logout } from "@/app/login/actions";
+import { AccountChip } from "@/components/layout/account-chip";
 import { BrandMark } from "@/components/layout/brand";
 import { NAV_ITEMS } from "@/components/layout/nav";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
@@ -63,7 +65,11 @@ export function Header() {
           Prototype
         </span>
         <ThemeToggle />
-        <form action={logout}>
+        <Suspense fallback={null}>
+          <AccountChip />
+        </Suspense>
+        {/* Phones: sign out from the account page (keeps the header from overflowing). */}
+        <form action={logout} className="hidden md:block">
           <button
             type="submit"
             aria-label="Sign out"
