@@ -269,15 +269,22 @@ export function useResearchRun(user: SessionUser) {
 
   /**
    * Re-runs one stage of the current run (same Run ID): "verify" re-verifies failed / unfinished
-   * stories, "draft" drafts queued stories without a draft.
+   * stories, "draft" drafts queued stories without a draft, "verify-story" verifies the one story
+   * `candidateId` (an editor's choice outside the verified places).
    */
   const retry = useCallback(
-    async (stage: "verify" | "draft") => {
+    async (stage: "verify" | "draft" | "verify-story", candidateId?: string) => {
       if (!run) return;
       setStatus("running");
       setError(null);
       try {
-        const response = await fetch(`/api/research/${run.runId}/${stage}`, { method: "POST" });
+        const response = await fetch(`/api/research/${run.runId}/${stage}`, {
+          method: "POST",
+          ...(candidateId && {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ candidateId }),
+          }),
+        });
         if (response.status === 401) return toLogin();
         if (!response.ok)
           throw new Error(await readError(response, `Retry failed (${response.status}).`));

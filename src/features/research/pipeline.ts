@@ -6,7 +6,7 @@ import { rankRun } from "./rank";
 import { stopRun } from "./run-store";
 import type { ResearchRun } from "./types";
 import { mayManageRun, type SessionUser } from "@/lib/roles";
-import { beginVerifyPass, verifyStep } from "./verify";
+import { beginVerifyPass, queueStory, verifyStep } from "./verify";
 
 /**
  * Runs the next bounded piece of a research run, each short enough for one serverless request:
@@ -81,6 +81,27 @@ export function prepareVerificationRetry(run: ResearchRun, env: ServerEnv): stri
   reopen(run, "processing");
   beginVerifyPass(run, env, true);
   for (const q of run.draftQueue) delete q.draftError;
+  return null;
+}
+
+/**
+ * Verifies one chosen story of a finished run (same Run ID), then drafts it if it qualifies for
+ * the draft queue. Returns why it can't, or null.
+ */
+export function prepareStoryVerification(
+  run: ResearchRun,
+  candidateId: string,
+  by: string,
+): string | null {
+  const blocked = retryBlocked(run);
+  if (blocked) return blocked;
+  const notQueued = queueStory(run, candidateId);
+  if (notQueued) return notQueued;
+  run.error = null;
+  run.finishedAt = null;
+  run.stageDetail = `Verifying one story chosen by ${by}`;
+  for (const q of run.draftQueue) delete q.draftError;
+  delete run.draftPass;
   return null;
 }
 

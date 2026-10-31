@@ -177,11 +177,37 @@ function warnOnce(run: ResearchRun, message: string) {
 /** Statuses of a story waiting for (or interrupted during) verification in this pass. */
 const PENDING = new Set<CandidateStatus>(["queued", "pending_evidence", "verifying"]);
 
-/** Verifiable (official-announcement) stories first, then by rank. Same order on retries. */
-function verifyOrder(run: ResearchRun): CandidateReport[] {
-  return [...run.candidates].sort(
+/** A quarterly/half-year results story (the bulk of the news in results season). */
+const RESULTS_HEADLINE =
+  /\bQ[1-4]\b|\bH[12]\b|\bresults?\b|\bearnings\b|\bnet (?:profit|loss)\b|\bprofit (?:rises?|jumps?|falls?|declines?|drops?|surges?|grows?|doubles|plunges?)\b|\bquarter(?:ly)?\b/i;
+
+/**
+ * Verification order: verifiable (official-announcement) stories first, then by rank, with at
+ * most half of the first `limit` being results stories; the rest of those places go to the next
+ * best other stories (deals, regulator actions, appointments, data). On 1 Nov 2026 results took
+ * 10 of the 12 places. Same order on retries.
+ */
+export function verifyOrder(
+  run: Pick<ResearchRun, "candidates">,
+  limit: number,
+): CandidateReport[] {
+  const sorted = [...run.candidates].sort(
     (a, b) => Number(b.verifiable === true) - Number(a.verifiable === true) || a.rank - b.rank,
   );
+  const maxResults = Math.ceil(limit / 2);
+  const slate: CandidateReport[] = [];
+  const waiting: CandidateReport[] = [];
+  let results = 0;
+  for (const c of sorted) {
+    const isResults = RESULTS_HEADLINE.test(c.headline);
+    if (slate.length < limit && (!isResults || results < maxResults)) {
+      slate.push(c);
+      if (isResults) results++;
+    } else waiting.push(c);
+  }
+  // Too few other stories: results fill the remaining places, best first.
+  while (slate.length < limit && waiting.length > 0) slate.push(waiting.shift()!);
+  return [...slate, ...waiting];
 }
 
 /**
@@ -190,8 +216,8 @@ function verifyOrder(run: ResearchRun): CandidateReport[] {
  * processed are queued again (same Run ID); finished stories are left as they are.
  */
 export function beginVerifyPass(run: ResearchRun, env: ServerEnv, retry = false) {
-  const order = verifyOrder(run);
   const limit = env.NEWS_RESEARCH_MAX_VERIFY;
+  const order = verifyOrder(run, limit);
   if (!retry)
     for (const c of order.slice(limit))
       markNotProcessed(c, `Not in the top ${limit} verified per run (NEWS_RESEARCH_MAX_VERIFY).`);
@@ -209,6 +235,29 @@ export function beginVerifyPass(run: ResearchRun, env: ServerEnv, retry = false)
   };
   run.stage = "processing";
   run.currentStep = "verify";
+}
+
+/**
+ * Queues one story an editor chose (e.g. ranked below the verified places) as a verification pass
+ * of its own: only this story, and the pass never extends to others. Returns why it can't, or null.
+ */
+export function queueStory(run: ResearchRun, candidateId: string): string | null {
+  const c = run.candidates.find((x) => x.id === candidateId);
+  if (!c) return "That story is not in this run.";
+  if (c.status === "verified") return "This story is already verified.";
+  if (PENDING.has(c.status)) return "This story is already waiting for verification.";
+  c.status = "queued";
+  c.statusReason = "Waiting for verification (chosen by an editor).";
+  run.verifyPass = {
+    startedAt: new Date().toISOString(),
+    searchesAtStart: run.counts.searchesUsed,
+    aiCallsAtStart: run.counts.aiCallsUsed,
+    extra: MAX_EXTRA, // no extension: only the chosen story
+    stopReason: null,
+  };
+  run.stage = "processing";
+  run.currentStep = "verify";
+  return null;
 }
 
 /**
@@ -230,8 +279,8 @@ export async function verifyStep(run: ResearchRun, env: ServerEnv): Promise<bool
   if (!run.verifyPass) beginVerifyPass(run, env);
   const pass = run.verifyPass!;
   const started = Date.now();
-  const order = verifyOrder(run);
   const limit = env.NEWS_RESEARCH_MAX_VERIFY;
+  const order = verifyOrder(run, limit);
 
   if (!pass.stopReason && started > Date.parse(pass.startedAt) + TIME_LIMIT_MS)
     pass.stopReason = `Time limit (${TIME_LIMIT_MS / 60_000} min) reached.`;

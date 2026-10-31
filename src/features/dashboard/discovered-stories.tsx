@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock, ExternalLink, Newspaper, Search } from "lucide-react";
+import { Clock, ExternalLink, Newspaper, Search, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,14 +33,32 @@ type Story = {
   topics: string[];
   method: DiscoveryMethod | undefined;
   /** Present once Step 4 has ranked the run. */
-  ranked?: Pick<CandidateReport, "rank" | "score" | "rankReasons" | "otherReports" | "screenedBy">;
+  ranked?: Pick<
+    CandidateReport,
+    "id" | "rank" | "score" | "rankReasons" | "otherReports" | "screenedBy" | "status"
+  >;
+};
+
+/** Statuses an editor may send to verification by hand (never verified, or it failed). */
+const VERIFY_LABEL: Partial<Record<CandidateReport["status"], string>> = {
+  not_processed: "Verify this story",
+  verification_failed: "Verify again",
 };
 
 /**
  * Steps 3–4 output in one list: discovered stories while discovery runs, then the ranked,
  * de-duplicated candidates. Titles and reasons are untrusted and rendered as text.
  */
-export function DiscoveredStories({ run }: { run: ResearchRun }) {
+export function DiscoveredStories({
+  run,
+  onVerify,
+  busy = false,
+}: {
+  run: ResearchRun;
+  /** Present when this account may verify a story by hand (finished run it owns or an admin). */
+  onVerify?: (candidateId: string) => void;
+  busy?: boolean;
+}) {
   const [showAll, setShowAll] = useState(false);
   const isRanked = run.stage !== "discovering" && run.stage !== "ranking";
   const methodByUrl = new Map(run.items.map((i) => [i.url, i.method]));
@@ -99,7 +117,7 @@ export function DiscoveredStories({ run }: { run: ResearchRun }) {
         <div className="p-4 sm:p-5">
           <ul className="grid gap-3 sm:grid-cols-2">
             {visible.map((story) => (
-              <StoryCard key={story.key} story={story} />
+              <StoryCard key={story.key} story={story} onVerify={onVerify} busy={busy} />
             ))}
           </ul>
           {stories.length > INITIAL_CARDS && (
@@ -142,9 +160,18 @@ export function DiscoveredStories({ run }: { run: ResearchRun }) {
   );
 }
 
-function StoryCard({ story }: { story: Story }) {
+function StoryCard({
+  story,
+  onVerify,
+  busy,
+}: {
+  story: Story;
+  onVerify?: (candidateId: string) => void;
+  busy: boolean;
+}) {
   const MethodIcon = story.method === "tavily" ? Search : Newspaper;
   const { ranked } = story;
+  const verifyLabel = ranked && onVerify ? VERIFY_LABEL[ranked.status] : undefined;
   return (
     <li className="flex min-w-0 flex-col gap-3 rounded-2xl border border-border bg-background/40 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -220,6 +247,19 @@ function StoryCard({ story }: { story: Story }) {
           <span className="sr-only"> (opens in a new tab): {story.title}</span>
         </a>
       </div>
+      {verifyLabel && ranked && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="self-start"
+          disabled={busy}
+          onClick={() => onVerify?.(ranked.id)}
+          title="Checks this story's claims against official sources (uses Tavily and Gemini credits)"
+        >
+          <ShieldCheck aria-hidden />
+          {verifyLabel}
+        </Button>
+      )}
     </li>
   );
 }
