@@ -1,4 +1,4 @@
-import { cancelRun } from "@/features/research/pipeline";
+import { cancelRun, ownerBlock } from "@/features/research/pipeline";
 import { getRun, saveRun } from "@/features/research/run-store";
 import type { ApiErrorBody } from "@/features/research/types";
 import { requireApi } from "@/lib/auth";
@@ -11,7 +11,12 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/research/[
   if (auth.denied) return auth.denied;
   const { runId } = await ctx.params;
   const run = await getRun(runId);
-  const blocked = run ? cancelRun(run) : "Research run not found.";
+  const denied = run && ownerBlock(run, auth.user, "cancel");
+  if (denied) {
+    const body: ApiErrorBody = { error: { code: "forbidden", message: denied, retryable: false } };
+    return Response.json(body, { status: 403, headers: { "Cache-Control": "no-store" } });
+  }
+  const blocked = run ? cancelRun(run, auth.user.name) : "Research run not found.";
   if (!run || blocked) {
     const body: ApiErrorBody = {
       error: { code: run ? "busy" : "not_found", message: blocked!, retryable: false },

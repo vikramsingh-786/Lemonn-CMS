@@ -1,4 +1,4 @@
-import { prepareVerificationRetry } from "@/features/research/pipeline";
+import { prepareVerificationRetry, ownerBlock } from "@/features/research/pipeline";
 import { requireApi } from "@/lib/auth";
 import { getRun, saveRun } from "@/features/research/run-store";
 import type { ApiErrorBody, StartRunResponse } from "@/features/research/types";
@@ -14,6 +14,11 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/research/[
   if (auth.denied) return auth.denied;
   const { runId } = await ctx.params;
   const run = await getRun(runId);
+  const denied = run && ownerBlock(run, auth.user, "retry");
+  if (denied) {
+    const body: ApiErrorBody = { error: { code: "forbidden", message: denied, retryable: false } };
+    return Response.json(body, { status: 403, headers: { "Cache-Control": "no-store" } });
+  }
   const blocked = run ? prepareVerificationRetry(run, serverEnv()) : "Research run not found.";
   if (!run || blocked) {
     const body: ApiErrorBody = {

@@ -181,8 +181,8 @@ export function ResearchPanel({
           <p className="mt-5 flex items-start gap-2.5 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
             <CircleSlash aria-hidden className="mt-0.5 size-4 shrink-0" />
             <span>
-              Research cancelled. Stories and drafts finished before the stop are kept. Run Research
-              News to start a new run.
+              {run?.stageDetail ? `${run.stageDetail}.` : "Research cancelled."} Stories and drafts
+              finished before the stop are kept. Run Research News to start a new run.
             </span>
           </p>
         )}

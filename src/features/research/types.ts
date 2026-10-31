@@ -273,6 +273,8 @@ export type ResearchRun = {
   runId: string;
   /** Name of the account that started the run (absent for runs from before accounts). */
   startedBy?: string;
+  /** Account id of the owner: only they continue, retry or cancel the run (admins may cancel). */
+  startedById?: string;
   /** Source ids chosen for this run; the discovery step reads them. */
   sourceIds: string[];
   /** Verification pass in progress, kept between step requests (budgets and time count from its start). */
@@ -330,7 +332,8 @@ export type ResearchErrorCode =
   | "provider_unavailable"
   | "ai_invalid_output"
   | "internal_error"
-  | "unauthorized";
+  | "unauthorized"
+  | "forbidden";
 
 export type ApiErrorBody = {
   error: {

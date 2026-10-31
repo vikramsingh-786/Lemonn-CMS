@@ -7,7 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { DiscoveredStories } from "./discovered-stories";
 import { ResearchFeed } from "./research-panel";
 import { ResearchProgress } from "./research-progress";
-import { can, type SessionUser } from "@/lib/roles";
+import type { SessionUser } from "@/lib/roles";
+import { CancelResearch } from "./cancel-research";
 import { useResearchRun } from "./use-research-run";
 import { VerificationReview } from "./verification-review";
 
@@ -16,8 +17,19 @@ import { VerificationReview } from "./verification-review";
  * verification evidence and the live feed. Drives the run while it is unfinished, like the home.
  */
 export function ResearchDetails({ runId, user }: { runId: string; user: SessionUser }) {
-  const canRun = can(user.role, "research:run");
-  const { run, status, error, notFound, running, load, retry } = useResearchRun(canRun);
+  const {
+    run,
+    status,
+    error,
+    notice,
+    notFound,
+    running,
+    canRetry,
+    canCancel,
+    load,
+    retry,
+    cancel,
+  } = useResearchRun(user);
 
   useEffect(() => {
     void load(runId);
@@ -46,7 +58,18 @@ export function ResearchDetails({ runId, user }: { runId: string; user: SessionU
             {run?.startedBy && <span className="font-sans"> · started by {run.startedBy}</span>}
           </p>
         </div>
+        {canCancel && (
+          <div>
+            <CancelResearch onCancel={() => void cancel()} />
+          </div>
+        )}
       </div>
+
+      {notice && running && (
+        <p role="status" className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+          {notice}
+        </p>
+      )}
 
       {error && (
         <p role="alert" className="text-sm text-destructive">
@@ -72,7 +95,7 @@ export function ResearchDetails({ runId, user }: { runId: string; user: SessionU
             <DiscoveredStories run={run} />
             <VerificationReview
               run={run}
-              onRetry={canRun ? () => void retry("verify") : undefined}
+              onRetry={canRetry ? () => void retry("verify") : undefined}
               retrying={running}
             />
           </div>

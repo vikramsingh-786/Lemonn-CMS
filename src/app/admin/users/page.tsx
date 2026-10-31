@@ -6,6 +6,7 @@ import { formatIst } from "@/features/dashboard/format";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { ROLE_LABEL, can, toRole } from "@/lib/roles";
+import { AdminTabs } from "../admin-tabs";
 import { RoleSelect } from "./role-select";
 
 export const metadata: Metadata = { title: "Users · Lemonn Newsroom" };
@@ -90,6 +91,7 @@ async function UsersList() {
 export default function UsersPage() {
   return (
     <AppShell>
+      <AdminTabs active="/admin/users" />
       <div>
         <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">Users</h1>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground sm:text-base">

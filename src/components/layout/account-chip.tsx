@@ -18,8 +18,8 @@ export async function AccountChip() {
       {can(user.role, "users:manage") && (
         <Link
           href="/admin/users"
-          aria-label="Users"
-          title="Users"
+          aria-label="Admin: accounts and research runs"
+          title="Admin: accounts and research runs"
           className="pill-raised hidden size-11 shrink-0 place-items-center rounded-full bg-card text-muted-foreground md:grid transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
           <Users aria-hidden className="size-5" />

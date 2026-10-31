@@ -5,7 +5,10 @@ import type { ResearchRun } from "./types";
 
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const FINISHED_STAGES = ["completed", "failed", "cancelled"];
-/** A run with no step for this long is abandoned and no longer blocks a new run. */
+/**
+ * A run with no step for this long is abandoned: it no longer blocks a new run, and the next read
+ * stops it for good (its page was closed; resuming hours later would research a stale window).
+ */
 const ACTIVE_MS = 30 * 60_000;
 
 /** The official-text passage an evidence item was matched on. Server-only; never sent to a browser. */
@@ -23,6 +26,19 @@ export async function createRun(run: ResearchRun, createdById?: string): Promise
   await db().researchRun.create({
     data: { id: run.runId, stage: run.stage, data: json(run), createdById },
   });
+}
+
+/**
+ * An unfinished run with a step running or one recently: it is going (its page is open). An
+ * unfinished run that is not active is abandoned and is stopped on its next read.
+ */
+export function isActive(row: { stage: string; updatedAt: Date; stepLockUntil: Date | null }) {
+  const now = Date.now();
+  return (
+    !FINISHED_STAGES.includes(row.stage) &&
+    (row.updatedAt.getTime() > now - ACTIVE_MS ||
+      (row.stepLockUntil !== null && row.stepLockUntil.getTime() > now))
+  );
 }
 
 /** The unfinished run that stepped recently, if any (only one run at a time). */
@@ -47,19 +63,49 @@ export async function latestRunId(): Promise<string | null> {
   return row?.id ?? null;
 }
 
-/** The run snapshot (never the evidence passages). */
+/**
+ * Stops an unfinished run: finished work (stories, verifications, drafts) is kept, stories still
+ * waiting are marked not verified.
+ */
+export function stopRun(run: ResearchRun, detail: string): void {
+  run.stage = "cancelled";
+  run.currentStep = null;
+  run.error = null;
+  run.finishedAt = new Date().toISOString();
+  run.stageDetail = detail;
+  for (const c of run.candidates) {
+    if (c.status === "queued" || c.status === "pending_evidence" || c.status === "verifying") {
+      c.status = "not_processed";
+      c.statusReason = "Not verified: the research run was stopped.";
+    }
+  }
+  run.counts.notProcessed = run.candidates.filter((c) => c.status === "not_processed").length;
+  delete run.verifyPass;
+  delete run.draftPass;
+}
+
+/** The run snapshot with its owner (never the evidence passages). Stops it if abandoned. */
 export async function getRun(runId: string): Promise<ResearchRun | undefined> {
   if (!isRunId(runId)) return undefined;
   const row = await db().researchRun.findUnique({
     where: { id: runId },
-    select: { data: true, stage: true },
+    select: { data: true, stage: true, updatedAt: true, stepLockUntil: true, createdById: true },
   });
   if (!row) return undefined;
   const run = row.data as unknown as ResearchRun;
+  if (row.createdById) run.startedById = row.createdById;
+  else delete run.startedById;
   // A run cancelled by hand in the database (only the stage column changed) stays cancelled.
   if (row.stage === "cancelled" && run.stage !== "cancelled") {
     run.stage = "cancelled";
     run.currentStep = null;
+  }
+  if (!FINISHED_STAGES.includes(run.stage) && !isActive(row)) {
+    stopRun(run, "Stopped: no progress for 30 minutes (the page running it was closed)");
+    await db().researchRun.updateMany({
+      where: { id: runId, stage: row.stage },
+      data: { stage: run.stage, data: json(run) },
+    });
   }
   return run;
 }
@@ -119,8 +165,28 @@ export async function claimStep(runId: string, ms: number): Promise<boolean> {
   return count === 1;
 }
 
+/**
+ * Saves a run reopened by resume (saveRun never writes over a cancelled run). False when it was
+ * no longer stopped (resumed twice at once).
+ */
+export async function saveReopenedRun(run: ResearchRun): Promise<boolean> {
+  const { count } = await db().researchRun.updateMany({
+    where: { id: run.runId, stage: { in: ["cancelled", "failed"] } },
+    data: { stage: run.stage, data: json(structuredClone(run)), stepLockUntil: null },
+  });
+  return count === 1;
+}
+
+/** Deletes a run and its articles. False when it doesn't exist. */
+export async function deleteRun(runId: string): Promise<boolean> {
+  if (!isRunId(runId)) return false;
+  const { count } = await db().researchRun.deleteMany({ where: { id: runId } });
+  return count === 1;
+}
+
 /** Releases the step lock after the step's snapshot is saved. */
 export async function releaseStep(runId: string): Promise<void> {
   await writes.get(runId);
-  await db().researchRun.update({ where: { id: runId }, data: { stepLockUntil: null } });
+  // updateMany: the run may have been deleted by an admin while this step ran.
+  await db().researchRun.updateMany({ where: { id: runId }, data: { stepLockUntil: null } });
 }
