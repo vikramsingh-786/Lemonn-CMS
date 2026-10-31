@@ -43,7 +43,7 @@ export async function runStep(run: ResearchRun, env: ServerEnv): Promise<void> {
 
 /** Read through a call: the step above may have changed the stage TypeScript narrowed. */
 function isFinished(run: ResearchRun): boolean {
-  return run.stage === "completed" || run.stage === "failed";
+  return run.stage === "completed" || run.stage === "failed" || run.stage === "cancelled";
 }
 
 function completeRun(run: ResearchRun) {
@@ -57,6 +57,7 @@ function completeRun(run: ResearchRun) {
 
 /** Why a retry can't start, or null. Only finished runs are retried. */
 function retryBlocked(run: ResearchRun): string | null {
+  if (run.stage === "cancelled") return "This run was cancelled. Start a new research run instead.";
   if (run.stage !== "completed" && run.stage !== "failed") return "This run is still in progress.";
   return null;
 }
@@ -91,6 +92,30 @@ export function prepareDraftRetry(run: ResearchRun): string | null {
   if (blocked) return blocked;
   reopen(run, "drafting");
   for (const q of pending) delete q.draftError;
+  delete run.draftPass;
+  return null;
+}
+
+/**
+ * Stops an unfinished run: no further steps run, finished work (stories, verifications, drafts)
+ * is kept, and a new run can start right away. A step already running finishes its current piece,
+ * but its save is ignored (see saveRun). Returns why it can't, or null.
+ */
+export function cancelRun(run: ResearchRun): string | null {
+  if (isFinished(run)) return "This run has already finished.";
+  run.stage = "cancelled";
+  run.currentStep = null;
+  run.error = null;
+  run.finishedAt = new Date().toISOString();
+  run.stageDetail = "Cancelled by an editor; finished steps are kept";
+  for (const c of run.candidates) {
+    if (c.status === "queued" || c.status === "pending_evidence" || c.status === "verifying") {
+      c.status = "not_processed";
+      c.statusReason = "Not verified: the research run was cancelled.";
+    }
+  }
+  run.counts.notProcessed = run.candidates.filter((c) => c.status === "not_processed").length;
+  delete run.verifyPass;
   delete run.draftPass;
   return null;
 }

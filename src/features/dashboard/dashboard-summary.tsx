@@ -2,6 +2,7 @@ import {
   CircleAlert,
   CircleCheck,
   CircleDashed,
+  CircleSlash,
   FileCheck2,
   Globe,
   LoaderCircle,
@@ -21,6 +22,7 @@ const RESEARCH_ICON = {
   running: LoaderCircle,
   done: CircleCheck,
   error: CircleAlert,
+  cancelled: CircleSlash,
 } as const;
 
 const RESEARCH_DETAIL: Record<ResearchStatus, string> = {
@@ -28,6 +30,7 @@ const RESEARCH_DETAIL: Record<ResearchStatus, string> = {
   running: "Discovering news (last 24h)",
   done: "Saved on this server",
   error: "See the message above",
+  cancelled: "Stopped; finished steps are kept",
 };
 
 export function DashboardSummary({
@@ -69,6 +72,7 @@ export function DashboardSummary({
     running: "text-primary",
     done: "text-success",
     error: "text-destructive",
+    cancelled: "text-muted-foreground",
   };
   const valueTone = ["text-success", tone[researchStatus], "text-foreground"];
 

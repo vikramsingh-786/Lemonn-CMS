@@ -4,6 +4,7 @@ import {
   ListOrdered,
   CircleAlert,
   CircleCheck,
+  CircleSlash,
   FileText,
   LoaderCircle,
   RotateCw,
@@ -35,6 +36,17 @@ const BUILT_STEPS = 5;
  */
 export function stepStates(status: ResearchStatus, run: ResearchRun | null): StepState[] {
   if (status === "done") return STEPS.map((_, i) => (i < BUILT_STEPS ? "done" : "idle"));
+  // Cancelled: the steps that produced something before the stop are done, the rest never ran.
+  if (status === "cancelled" && run) {
+    const verified = run.counts.processed > 0;
+    return [
+      run.coverage.length > 0,
+      run.candidates.length > 0,
+      verified,
+      verified,
+      run.drafts.length > 0,
+    ].map((ran): StepState => (ran ? "done" : "idle"));
+  }
   if (status !== "running") return STEPS.map(() => "idle");
   const step = run?.currentStep ?? "discover";
   const current = STEPS.findIndex((s) => s.key === (step === "verify" ? "evidence" : step));
@@ -159,6 +171,15 @@ export function ResearchPanel({
             <LoaderCircle aria-hidden className="mt-0.5 size-4 shrink-0 animate-spin" />
             <span>
               {run ? run.stageDetail : "Starting research…"}. A full run can take several minutes.
+            </span>
+          </p>
+        )}
+        {status === "cancelled" && (
+          <p className="mt-5 flex items-start gap-2.5 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+            <CircleSlash aria-hidden className="mt-0.5 size-4 shrink-0" />
+            <span>
+              Research cancelled. Stories and drafts finished before the stop are kept. Run Research
+              News to start a new run.
             </span>
           </p>
         )}

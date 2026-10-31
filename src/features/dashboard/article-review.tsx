@@ -32,6 +32,8 @@ type ArticleReviewProps = {
   drafts: readonly ResearchDraft[];
   /** True once a research run has finished (even with zero drafts). */
   hasRun: boolean;
+  /** The run was cancelled by an editor (explains an empty list). */
+  cancelled?: boolean;
   /** The editor's article for each draft that has one, by candidateId. */
   articles: Readonly<Record<string, ArticleSummary>>;
   /** Opens the draft in the article editor (creating the article the first time). */
@@ -48,6 +50,7 @@ type ArticleReviewProps = {
 export function ArticleReview({
   drafts,
   hasRun,
+  cancelled = false,
   articles,
   onEdit,
   opening,
@@ -122,7 +125,7 @@ export function ArticleReview({
       </div>
 
       {visible.length === 0 ? (
-        <EmptyState filtered={filter !== "all"} hasRun={hasRun} />
+        <EmptyState filtered={filter !== "all"} hasRun={hasRun} cancelled={cancelled} />
       ) : (
         <ul className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
           {visible.map((draft) => (
@@ -349,18 +352,31 @@ function DraftDetails({ draft }: { draft: ResearchDraft }) {
   );
 }
 
-function EmptyState({ filtered, hasRun }: { filtered: boolean; hasRun: boolean }) {
+function EmptyState({
+  filtered,
+  hasRun,
+  cancelled,
+}: {
+  filtered: boolean;
+  hasRun: boolean;
+  cancelled: boolean;
+}) {
   const [title, text] = filtered
     ? ["No articles in this view", "Articles with this status will appear here."]
-    : hasRun
+    : cancelled
       ? [
-          "No drafts",
-          "No story was verified strongly enough to draft, or drafting failed. See Internal research details for the verification evidence and run summary.",
+          "Research cancelled",
+          "This run was stopped before any drafts were written. Run Research News to start a new one.",
         ]
-      : [
-          "No research results yet",
-          "Run Research News to discover, verify and draft stories from your enabled sources.",
-        ];
+      : hasRun
+        ? [
+            "No drafts",
+            "No story was verified strongly enough to draft, or drafting failed. See Internal research details for the verification evidence and run summary.",
+          ]
+        : [
+            "No research results yet",
+            "Run Research News to discover, verify and draft stories from your enabled sources.",
+          ];
   return (
     <div className="flex flex-col items-center px-6 py-14 text-center">
       <span className="grid size-10 place-items-center rounded-full bg-muted text-muted-foreground">

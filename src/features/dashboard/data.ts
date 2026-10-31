@@ -58,11 +58,12 @@ export const DEFAULT_SOURCES: readonly NewsSource[] = [
   },
 ];
 
-export type ResearchStatus = "idle" | "running" | "done" | "error";
+export type ResearchStatus = "idle" | "running" | "done" | "error" | "cancelled";
 
 export const RESEARCH_STATUS_LABEL: Record<ResearchStatus, string> = {
   idle: "Not Started",
   running: "Researching…",
   done: "Completed",
   error: "Failed",
+  cancelled: "Cancelled",
 };
