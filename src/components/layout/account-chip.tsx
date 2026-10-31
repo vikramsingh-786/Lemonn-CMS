@@ -15,7 +15,7 @@ export async function AccountChip() {
     .toUpperCase();
   return (
     <>
-      {can(user.role, "users:view") && (
+      {can(user.role, "users:manage") && (
         <Link
           href="/admin/users"
           aria-label="Users"

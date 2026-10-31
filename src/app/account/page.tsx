@@ -51,7 +51,7 @@ async function Account() {
           </dl>
           <p className="mt-4 text-sm text-muted-foreground">{ROLE_HELP[user.role]}</p>
           <div className="mt-5 flex flex-wrap gap-2">
-            {can(user.role, "users:view") && (
+            {can(user.role, "users:manage") && (
               <Link
                 href="/admin/users"
                 className="pill-raised inline-flex h-9 items-center gap-2 rounded-full bg-muted px-4 text-xs font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"

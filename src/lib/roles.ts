@@ -1,6 +1,6 @@
 /**
- * Roles and what they may do. Grant a role by changing User.role in the database
- * (or `pnpm user:role <email> <role>`). Unknown values count as "user" (read-only).
+ * Roles and what they may do. Admins change roles on /admin/users (or User.role in the
+ * database). Unknown values count as "user" (read-only).
  */
 export const ROLES = ["admin", "team", "user"] as const;
 export type Role = (typeof ROLES)[number];
@@ -10,11 +10,11 @@ export type Permission =
   | "research:run"
   /** Open drafts as articles, edit them, mark ready or rejected. */
   | "articles:edit"
-  /** See the list of accounts. */
-  | "users:view";
+  /** See every account and change roles (admin page). */
+  | "users:manage";
 
 const GRANTS: Record<Role, readonly Permission[]> = {
-  admin: ["research:run", "articles:edit", "users:view"],
+  admin: ["research:run", "articles:edit", "users:manage"],
   team: ["research:run", "articles:edit"],
   user: [],
 };
