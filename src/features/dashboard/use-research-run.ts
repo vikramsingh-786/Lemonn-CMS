@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ApiErrorBody, ResearchRun, StartRunResponse } from "@/features/research/types";
+import type {
+  ApiErrorBody,
+  CurrentRunResponse,
+  ResearchRun,
+  StartRunResponse,
+} from "@/features/research/types";
 import type { ResearchStatus } from "./data";
 
 /** Wait before asking again when another tab is running this run's step. */
@@ -29,6 +34,8 @@ export function useResearchRun() {
   const [status, setStatus] = useState<ResearchStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  /** Neutral information for the editor (not an error), e.g. "showing the run already going". */
+  const [notice, setNotice] = useState<string | null>(null);
   const mounted = useRef(true);
   /** The run this page is driving, and whether the editor asked to stop it. */
   const current = useRef<string | null>(null);
@@ -165,6 +172,7 @@ export function useResearchRun() {
     async (sources: { id: string; enabled: boolean }[], onCreated?: (runId: string) => void) => {
       setStatus("running");
       setError(null);
+      setNotice(null);
       setRun(null);
       current.current = null;
       cancelPending.current = false;
@@ -174,6 +182,18 @@ export function useResearchRun() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sources }),
         });
+        if (response.status === 409) {
+          // A run is already going (another tab, a refresh, another editor): show it and keep it
+          // moving instead of leaving the editor at a dead end.
+          const body = (await response.json().catch(() => null)) as ApiErrorBody | null;
+          if (body?.runId) {
+            setNotice("A research run was already in progress, so it is shown here and continues.");
+            onCreated?.(body.runId);
+            await load(body.runId);
+            return;
+          }
+          throw new Error(body?.error.message ?? "A research run is already in progress.");
+        }
         if (!response.ok)
           throw new Error(await readError(response, `Research failed (${response.status}).`));
         const { runId } = (await response.json()) as StartRunResponse;
@@ -189,8 +209,24 @@ export function useResearchRun() {
         fail(e);
       }
     },
-    [follow, fail, cancelOnServer],
+    [follow, fail, cancelOnServer, load],
   );
+
+  /**
+   * For a page opened without a Run ID (refresh, new tab, another device): shows the run in
+   * progress and keeps it going, else the latest run. Returns the Run ID shown, or null.
+   */
+  const loadCurrent = useCallback(async (): Promise<string | null> => {
+    const response = await fetch("/api/research").catch(() => null);
+    if (!response?.ok || !mounted.current) return null;
+    const { activeRunId, latestRunId } = (await response.json()) as CurrentRunResponse;
+    const runId = activeRunId ?? latestRunId;
+    if (!runId) return null;
+    if (activeRunId)
+      setNotice("Research in progress: showing it and continuing where it left off.");
+    void load(runId);
+    return runId;
+  }, [load]);
 
   /**
    * Re-runs one stage of the current run (same Run ID): "verify" re-verifies failed / unfinished
@@ -218,8 +254,10 @@ export function useResearchRun() {
     status,
     error,
     notFound,
+    notice,
     running: status === "running",
     load,
+    loadCurrent,
     start,
     retry,
     cancel,
