@@ -2,8 +2,8 @@ import { z } from "zod";
 import { requireApiSession } from "@/lib/session";
 import { DEFAULT_SOURCES } from "@/features/dashboard/data";
 import { needsTavily, newRun } from "@/features/research/discovery";
-import { activeRunId, createRun } from "@/features/research/run-store";
-import type { ApiErrorBody, StartRunResponse } from "@/features/research/types";
+import { activeRunId, createRun, latestRunId } from "@/features/research/run-store";
+import type { ApiErrorBody, CurrentRunResponse, StartRunResponse } from "@/features/research/types";
 import { serverEnv } from "@/lib/env";
 
 const WINDOW_HOURS = 24;
@@ -29,6 +29,18 @@ function error(
 ) {
   const body: ApiErrorBody = { error: { code, message, retryable } };
   return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
+}
+
+/**
+ * The run in progress and the latest run, so a page opened without ?run= (refresh, new tab,
+ * another device) can show and resume the current research instead of looking idle.
+ */
+export async function GET() {
+  const denied = await requireApiSession();
+  if (denied) return denied;
+  const [active, latest] = await Promise.all([activeRunId(), latestRunId()]);
+  const body: CurrentRunResponse = { activeRunId: active, latestRunId: latest };
+  return Response.json(body, { headers: { "Cache-Control": "no-store" } });
 }
 
 /** Validate the request and create the run; the dashboard then drives it with /step requests. */
@@ -60,8 +72,15 @@ export async function POST(request: Request) {
     );
   }
 
-  if (await activeRunId())
-    return error(409, "busy", "A research run is already in progress.", true);
+  const active = await activeRunId();
+  if (active) {
+    // Say which run, so the page can show it (and keep it going) instead of a dead end.
+    const body: ApiErrorBody = {
+      error: { code: "busy", message: "A research run is already in progress.", retryable: true },
+      runId: active,
+    };
+    return Response.json(body, { status: 409, headers: { "Cache-Control": "no-store" } });
+  }
   const end = new Date();
   const start = new Date(end.getTime() - WINDOW_HOURS * 3_600_000);
   const run = newRun(enabled, { start: start.toISOString(), end: end.toISOString() });

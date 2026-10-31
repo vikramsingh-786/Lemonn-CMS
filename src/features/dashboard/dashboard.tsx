@@ -37,7 +37,8 @@ export function Dashboard() {
   const [editError, setEditError] = useState<string | null>(null);
   const router = useRouter();
   const [confirmCancel, setConfirmCancel] = useState(false);
-  const { run, status, error, running, load, start, retry, cancel } = useResearchRun();
+  const { run, status, error, notice, running, load, loadCurrent, start, retry, cancel } =
+    useResearchRun();
   const runId = run?.runId;
   const draftCount = run?.drafts.length ?? 0;
 
@@ -78,13 +79,20 @@ export function Dashboard() {
   }
 
   useEffect(() => {
-    // Revisit / refresh: reload the run named in the URL (results are saved on the server).
+    // Revisit / refresh: reload the run named in the URL; without one (new tab, refresh before
+    // the URL was updated, another device), show the run in progress or the latest one.
     const runId = new URLSearchParams(window.location.search).get("run");
+    const show = (id: string | null) => {
+      if (id) window.history.replaceState(null, "", `?run=${id}`);
+    };
     if (runId)
       void load(runId).then((found) => {
-        if (!found) window.history.replaceState(null, "", window.location.pathname);
+        if (found) return;
+        window.history.replaceState(null, "", window.location.pathname);
+        void loadCurrent().then(show);
       });
-  }, [load]);
+    else void loadCurrent().then(show);
+  }, [load, loadCurrent]);
 
   const enabledSources = sources.filter((s) => s.enabled).length;
 
@@ -128,6 +136,12 @@ export function Dashboard() {
         readyToPublish={Object.values(articles).filter((a) => a.status === "ready").length}
         draftCount={drafts.length}
       />
+
+      {notice && running && (
+        <p role="status" className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+          {notice}
+        </p>
+      )}
 
       {((status !== "error" && error) || editError) && (
         <p role="alert" className="text-sm text-destructive">

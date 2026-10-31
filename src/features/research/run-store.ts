@@ -36,6 +36,15 @@ export async function activeRunId(): Promise<string | null> {
   return row?.id ?? null;
 }
 
+/** The most recently created run, if any. */
+export async function latestRunId(): Promise<string | null> {
+  const row = await db().researchRun.findFirst({
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  return row?.id ?? null;
+}
+
 /** The run snapshot (never the evidence passages). */
 export async function getRun(runId: string): Promise<ResearchRun | undefined> {
   if (!isRunId(runId)) return undefined;

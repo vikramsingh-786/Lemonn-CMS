@@ -336,9 +336,14 @@ export type ApiErrorBody = {
     message: string;
     retryable: boolean;
   };
+  /** With "busy" on start: the run already in progress, so the page can show it instead. */
+  runId?: string;
 };
 
 export type StartRunResponse = { runId: string };
+
+/** GET /api/research: the run in progress (if any) and the most recent run. */
+export type CurrentRunResponse = { activeRunId: string | null; latestRunId: string | null };
 
 /** Source as shown on the dashboard (from DEFAULT_SOURCES). */
 export type ConfiguredSource = {
