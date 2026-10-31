@@ -59,7 +59,7 @@ export function DashboardSummary({
     {
       label: "Articles Ready to Publish",
       value: String(readyToPublish),
-      detail: `${draftCount} verified draft${draftCount === 1 ? "" : "s"} awaiting human review`,
+      detail: `Marked ready by an editor · ${draftCount} draft${draftCount === 1 ? "" : "s"} in this run`,
       icon: <FileCheck2 aria-hidden />,
     },
   ];

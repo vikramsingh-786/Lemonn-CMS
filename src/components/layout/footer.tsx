@@ -33,7 +33,7 @@ export async function Footer() {
               Dashboard
             </Link>
             <Link
-              href="#articles"
+              href="/articles"
               className="rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               Articles

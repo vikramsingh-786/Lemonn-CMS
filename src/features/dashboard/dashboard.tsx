@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Dialog } from "@/components/ui/dialog";
-import type { ConfiguredSource } from "@/features/research/types";
+import type { ArticleSummary } from "@/features/articles/types";
+import type { ConfiguredSource, ResearchDraft } from "@/features/research/types";
 import { ArticleReview } from "./article-review";
 import { DashboardSummary } from "./dashboard-summary";
 import { DEFAULT_SOURCES, sourceDomain } from "./data";
@@ -29,8 +30,49 @@ const INITIAL_SOURCES: ConfiguredSource[] = DEFAULT_SOURCES.map((s) => ({
  */
 export function Dashboard() {
   const [sources, setSources] = useState<ConfiguredSource[]>(INITIAL_SOURCES);
-  const [publishOpen, setPublishOpen] = useState(false);
+  const [articles, setArticles] = useState<Record<string, ArticleSummary>>({});
+  const [opening, setOpening] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const router = useRouter();
   const { run, status, error, running, load, start, retry } = useResearchRun();
+  const runId = run?.runId;
+  const draftCount = run?.drafts.length ?? 0;
+
+  // Which drafts already have an article (and its status), for the cards and filters.
+  useEffect(() => {
+    if (!runId || draftCount === 0) return;
+    let live = true;
+    fetch(`/api/articles?runId=${runId}`)
+      .then((r) => (r.ok ? (r.json() as Promise<{ articles: ArticleSummary[] }>) : null))
+      .then((data) => {
+        if (live && data)
+          setArticles(Object.fromEntries(data.articles.map((a) => [a.candidateId, a])));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [runId, draftCount]);
+
+  /** Opens the editor; the first time, the server creates the article from the AI draft. */
+  async function editDraft(draft: ResearchDraft) {
+    if (!runId) return;
+    const existing = articles[draft.candidateId];
+    if (existing) return router.push(`/articles/${existing.id}`);
+    setOpening(draft.id);
+    setEditError(null);
+    const response = await fetch("/api/articles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId, candidateId: draft.candidateId }),
+    }).catch(() => null);
+    const data = response?.ok ? ((await response.json()) as { id: string }) : null;
+    if (data) router.push(`/articles/${data.id}`);
+    else {
+      setOpening(null);
+      setEditError("Could not open the editor for this draft. Try again.");
+    }
+  }
 
   useEffect(() => {
     // Revisit / refresh: reload the run named in the URL (results are saved on the server).
@@ -79,13 +121,13 @@ export function Dashboard() {
         totalSources={sources.length}
         enabledSources={enabledSources}
         researchStatus={status}
-        readyToPublish={0}
+        readyToPublish={Object.values(articles).filter((a) => a.status === "ready").length}
         draftCount={drafts.length}
       />
 
-      {status !== "error" && error && (
+      {((status !== "error" && error) || editError) && (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {editError ?? error}
         </p>
       )}
 
@@ -123,7 +165,9 @@ export function Dashboard() {
           <ArticleReview
             drafts={drafts}
             hasRun={status === "done" || (run !== null && !running)}
-            onPublish={() => setPublishOpen(true)}
+            articles={articles}
+            onEdit={(draft) => void editDraft(draft)}
+            opening={opening}
             pending={(run?.draftQueue ?? [])
               .filter((q) => !drafts.some((d) => d.candidateId === q.candidateId))
               .map((q) => ({ headline: q.headline, reason: q.draftError ?? "Not drafted yet." }))}
@@ -139,15 +183,6 @@ export function Dashboard() {
           />
         </div>
       </div>
-
-      <Dialog
-        open={publishOpen}
-        onClose={() => setPublishOpen(false)}
-        title="Publishing is not connected"
-      >
-        No article has been published. Publishing to the Lemonn website is not connected yet, and
-        this draft was not sent anywhere. It stays private in this prototype.
-      </Dialog>
     </>
   );
 }

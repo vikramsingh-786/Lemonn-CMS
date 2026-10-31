@@ -4,7 +4,8 @@ Standalone internal CMS that will become Lemonn's AI-assisted financial news too
 It is fully separate from the `lemonn.co.in` application: its own repo, database and deployment.
 
 **Status:** research pipeline prototype. The dashboard runs discovery, ranking, claim verification and
-drafting; runs are saved in PostgreSQL. No auth, worker, editing or publishing yet.
+drafting; editors edit drafts as articles and mark them ready. Data is in PostgreSQL, behind a
+password sign-in. No background worker or publishing yet.
 
 ## Stack
 
