@@ -92,7 +92,7 @@ export async function requireUser(nextPath = "/"): Promise<SessionUser> {
 const ACTION_LABEL: Record<Permission, string> = {
   "research:run": "run research",
   "articles:edit": "edit articles",
-  "users:view": "see the user list",
+  "users:manage": "manage accounts",
 };
 
 /**

@@ -56,7 +56,8 @@ All variables are server-only. Validate new ones with Zod on the server and add 
 - Deployed databases: run `pnpm db:deploy` (`prisma migrate deploy`) against them before or during
   each deploy; it applies committed migrations only.
 - First admin: sign up at `/signup`, then in the database run
-  `UPDATE "User" SET role = 'admin' WHERE email = 'you@example.com';` (`team` for editors).
+  `UPDATE "User" SET role = 'admin' WHERE email = 'you@example.com';`. After that, admins change roles on
+  `/admin/users`.
   Role changes apply on the next request; no sign-out needed.
 - The generated client lives in `src/generated/prisma` and is not committed.
 

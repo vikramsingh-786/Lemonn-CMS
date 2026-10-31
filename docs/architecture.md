@@ -49,7 +49,7 @@ a `version`, so a stale tab gets 409 instead of overwriting.
 
 Accounts (`src/lib/auth.ts`, `roles.ts`): anyone can sign up at `/signup` with an email and a
 password (≥ 10 characters, scrypt-hashed, `password.ts`); new accounts get role `user`
-(read-only). Roles are changed in the database only: `admin` (everything, plus `/admin/users`),
+(read-only). Admins change roles on `/admin/users` (not their own, so an admin always remains): `admin` (everything),
 `team` (run, cancel and retry research; edit articles and mark them ready or rejected), `user`
 (view only; a read-only page polls a run instead of driving its steps, so it never spends API
 credits). A session is a random cookie token whose SHA-256 is the `Session` row id: 7 days idle

@@ -6,15 +6,16 @@ import { formatIst } from "@/features/dashboard/format";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { ROLE_LABEL, can, toRole } from "@/lib/roles";
+import { RoleSelect } from "./role-select";
 
 export const metadata: Metadata = { title: "Users · Lemonn Newsroom" };
 
 async function UsersList() {
   const me = await requireUser("/admin/users");
-  if (!can(me.role, "users:view"))
+  if (!can(me.role, "users:manage"))
     return (
       <p role="alert" className="rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
-        Only admins can see the user list.
+        Only admins can see and manage accounts.
       </p>
     );
   const users = await db().user.findMany({
@@ -59,9 +60,14 @@ async function UsersList() {
                   <td className="px-5 py-3 font-medium">{u.name}</td>
                   <td className="px-5 py-3 break-all text-muted-foreground">{u.email}</td>
                   <td className="px-5 py-3">
-                    <Badge variant={role === "user" ? "neutral" : "success"}>
-                      {ROLE_LABEL[role]}
-                    </Badge>
+                    {u.id === me.id ? (
+                      // Own role is fixed here, so there is always an admin.
+                      <Badge variant="success" title="Another admin can change your role">
+                        {ROLE_LABEL[role]} (you)
+                      </Badge>
+                    ) : (
+                      <RoleSelect userId={u.id} name={u.name} role={role} />
+                    )}
                   </td>
                   <td className="px-5 py-3 text-muted-foreground">
                     {formatIst(u.createdAt.toISOString())}
@@ -87,14 +93,9 @@ export default function UsersPage() {
       <div>
         <h1 className="font-display text-3xl font-semibold tracking-tight sm:text-4xl">Users</h1>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground sm:text-base">
-          Everyone with an account. New accounts are read-only. To change a role, run this in the
-          database (Neon SQL editor, or psql locally); it applies on their next page load:
-          <code className="mt-2 block overflow-x-auto rounded-xl bg-muted px-3 py-2 text-xs">
-            UPDATE &quot;User&quot; SET role = &apos;team&apos; WHERE email =
-            &apos;name@example.com&apos;;
-          </code>
-          Roles: admin (everything, incl. this list), team (research and article editing), user
-          (read-only).
+          Everyone with an account. New accounts are read-only. Pick a role to change it; it applies
+          on their next page load. Admin: everything, including this page. Team: run research and
+          edit articles. Read-only: view only.
         </p>
       </div>
       <Suspense fallback={<p className="text-sm text-muted-foreground">Loading users…</p>}>
