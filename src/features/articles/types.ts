@@ -24,11 +24,20 @@ export type Article = ArticleFields & {
   version: number;
   createdAt: string;
   updatedAt: string;
+  /** Name of the account that saved it last (null before accounts existed). */
+  updatedByName: string | null;
 };
 
 export type ArticleSummary = Pick<
   Article,
-  "id" | "runId" | "candidateId" | "status" | "headline" | "category" | "updatedAt"
+  | "id"
+  | "runId"
+  | "candidateId"
+  | "status"
+  | "headline"
+  | "category"
+  | "updatedAt"
+  | "updatedByName"
 >;
 
 /** What the editor shows beside the text: the AI draft it came from and the story's evidence. */

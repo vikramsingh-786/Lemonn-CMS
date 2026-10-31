@@ -47,7 +47,19 @@ re-runs the draft checks against the story's evidence (`checkArticle`). Status: 
 editor's confirmation) or `rejected`; editing a ready article returns it to `draft`. Saves carry
 a `version`, so a stale tab gets 409 instead of overwriting.
 
-Not built yet: per-user accounts, a background worker (runs advance only while the dashboard is open),
+Accounts (`src/lib/auth.ts`, `roles.ts`): anyone can sign up at `/signup` with an email and a
+password (≥ 10 characters, scrypt-hashed, `password.ts`); new accounts get role `user`
+(read-only). Roles are changed in the database only: `admin` (everything, plus `/admin/users`),
+`team` (run, cancel and retry research; edit articles and mark them ready or rejected), `user`
+(view only; a read-only page polls a run instead of driving its steps, so it never spends API
+credits). A session is a random cookie token whose SHA-256 is the `Session` row id: 7 days idle
+(sliding), 30 days at most; signing out deletes the row, and changing the password ends the other
+sessions. `proxy.ts` only checks that the cookie exists; every page calls `requireUser` and every
+API route `requireApi(permission)` (401 when signed out, 403 when the role lacks the permission).
+Sign-in and sign-up attempts are limited per email and per IP (`LoginAttempt`). Runs record who
+started them, articles who last saved them.
+
+Not built yet: a background worker (runs advance only while the dashboard is open),
 source management, publishing and the audit log.
 
 ## System boundaries
@@ -116,6 +128,7 @@ tests/e2e/        Playwright
 
 - Secrets live only in server environment variables; never `NEXT_PUBLIC_`.
 - Validate all external input with Zod at server boundaries.
-- Real authentication must exist before the CMS is reachable beyond local development.
+- Every page and API route checks the session and the role on the server; the proxy is only a
+  fast redirect. Anyone with the URL can sign up (read-only), so read-only users can see drafts.
 - The worker must treat fetched web content as untrusted: domain allowlist, SSRF protection,
   timeouts and rate limits.

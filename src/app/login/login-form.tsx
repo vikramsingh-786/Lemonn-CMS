@@ -1,64 +1,61 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { login, type LoginState } from "./actions";
+import { login, type AuthFormState } from "./actions";
+import { FormError, PasswordField, TextField } from "./auth-fields";
 
 export function LoginForm() {
-  const next = useSearchParams().get("next") ?? "/";
-  const [state, action, pending] = useActionState<LoginState, FormData>(login, { error: null });
-  const [visible, setVisible] = useState(false);
+  const params = useSearchParams();
+  const next = params.get("next") ?? "/";
+  const [state, action, pending] = useActionState<AuthFormState, FormData>(login, { error: null });
+  const invalid = Boolean(state.error);
 
   return (
-    <form action={action} className="mt-6 flex flex-col gap-4" noValidate>
-      <input type="hidden" name="next" value={next} />
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="password" className="text-sm font-medium">
-          Password
-        </label>
-        <div className="relative">
-          <input
-            id="password"
-            name="password"
-            type={visible ? "text" : "password"}
-            autoComplete="current-password"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            required
-            autoFocus
-            aria-invalid={state.error ? true : undefined}
-            aria-describedby={state.error ? "login-error" : undefined}
-            className="h-10 w-full rounded-md border border-input bg-card pr-11 pl-3 text-sm font-normal focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          />
-          {/* Show or hide what was typed; doesn't submit the form. */}
-          <button
-            type="button"
-            onClick={() => setVisible((v) => !v)}
-            aria-label={visible ? "Hide password" : "Show password"}
-            aria-pressed={visible}
-            aria-controls="password"
-            title={visible ? "Hide password" : "Show password"}
-            className="absolute inset-y-0 right-0 grid w-10 place-items-center rounded-r-md text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          >
-            {visible ? (
-              <EyeOff aria-hidden className="size-4" />
-            ) : (
-              <Eye aria-hidden className="size-4" />
-            )}
-          </button>
-        </div>
-      </div>
-      {state.error && (
-        <p id="login-error" role="alert" className="text-sm text-destructive">
-          {state.error}
+    <>
+      {params.get("expired") && !state.error && (
+        <p
+          role="status"
+          className="mt-5 rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground"
+        >
+          Your session has ended. Sign in again to continue where you left off.
         </p>
       )}
-      <Button type="submit" disabled={pending}>
-        {pending ? "Signing in…" : "Sign in"}
-      </Button>
-    </form>
+      <form action={action} className="mt-6 flex flex-col gap-4" noValidate>
+        <input type="hidden" name="next" value={next} />
+        <TextField
+          // Remount with the typed email after each attempt (React clears the form).
+          key={state.values?.email ?? ""}
+          name="email"
+          label="Email"
+          type="email"
+          autoComplete="email"
+          autoFocus
+          invalid={invalid}
+          defaultValue={state.values?.email}
+        />
+        <PasswordField
+          name="password"
+          label="Password"
+          autoComplete="current-password"
+          invalid={invalid}
+        />
+        <FormError error={state.error} />
+        <Button type="submit" disabled={pending}>
+          {pending ? "Signing in…" : "Sign in"}
+        </Button>
+      </form>
+      <p className="mt-5 text-center text-sm text-muted-foreground">
+        New here?{" "}
+        <Link
+          href={`/signup?next=${encodeURIComponent(next)}`}
+          className="font-medium text-foreground underline-offset-4 hover:underline"
+        >
+          Create an account
+        </Link>
+      </p>
+    </>
   );
 }

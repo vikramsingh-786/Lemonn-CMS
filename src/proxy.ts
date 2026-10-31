@@ -1,17 +1,23 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
+import { SESSION_COOKIE } from "@/lib/session-cookie";
 
 /**
- * Sign-in gate for every page and API route except /login and static files: pages redirect to
- * /login, API calls get 401. Route handlers check the session again (requireApiSession).
+ * A quick first gate: no session cookie → pages redirect to /login (keeping the page to return
+ * to), API calls get 401. It doesn't touch the database; every page and route handler checks the
+ * session and the role itself (requireUser / requireApi in src/lib/auth.ts).
  */
-export async function proxy(request: NextRequest) {
-  if (await verifySessionToken(request.cookies.get(SESSION_COOKIE)?.value))
-    return NextResponse.next();
+export function proxy(request: NextRequest) {
+  if (request.cookies.has(SESSION_COOKIE)) return NextResponse.next();
   const { pathname, search } = request.nextUrl;
   if (pathname.startsWith("/api/"))
     return Response.json(
-      { error: { code: "unauthorized", message: "Sign in required.", retryable: false } },
+      {
+        error: {
+          code: "unauthorized",
+          message: "Your session has ended. Sign in again.",
+          retryable: false,
+        },
+      },
       { status: 401, headers: { "Cache-Control": "no-store" } },
     );
   const login = new URL("/login", request.url);
@@ -20,7 +26,8 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
+  // Everything except exactly /login and /signup, Next's assets and static files.
   matcher: [
-    "/((?!login|_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!(?:login|signup)(?:/|$)|_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

@@ -1,14 +1,14 @@
 import { cancelRun } from "@/features/research/pipeline";
 import { getRun, saveRun } from "@/features/research/run-store";
 import type { ApiErrorBody } from "@/features/research/types";
-import { requireApiSession } from "@/lib/session";
+import { requireApi } from "@/lib/auth";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
 /** Stops a research run (see cancelRun) and returns the cancelled snapshot. */
 export async function POST(_request: Request, ctx: RouteContext<"/api/research/[runId]/cancel">) {
-  const denied = await requireApiSession();
-  if (denied) return denied;
+  const auth = await requireApi("research:run");
+  if (auth.denied) return auth.denied;
   const { runId } = await ctx.params;
   const run = await getRun(runId);
   const blocked = run ? cancelRun(run) : "Research run not found.";

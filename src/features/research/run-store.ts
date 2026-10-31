@@ -19,8 +19,10 @@ export function isRunId(id: string): boolean {
 const json = (run: ResearchRun) => run as unknown as Prisma.InputJsonValue;
 
 /** Saves a new run. */
-export async function createRun(run: ResearchRun): Promise<void> {
-  await db().researchRun.create({ data: { id: run.runId, stage: run.stage, data: json(run) } });
+export async function createRun(run: ResearchRun, createdById?: string): Promise<void> {
+  await db().researchRun.create({
+    data: { id: run.runId, stage: run.stage, data: json(run), createdById },
+  });
 }
 
 /** The unfinished run that stepped recently, if any (only one run at a time). */
@@ -48,8 +50,18 @@ export async function latestRunId(): Promise<string | null> {
 /** The run snapshot (never the evidence passages). */
 export async function getRun(runId: string): Promise<ResearchRun | undefined> {
   if (!isRunId(runId)) return undefined;
-  const row = await db().researchRun.findUnique({ where: { id: runId }, select: { data: true } });
-  return row ? (row.data as unknown as ResearchRun) : undefined;
+  const row = await db().researchRun.findUnique({
+    where: { id: runId },
+    select: { data: true, stage: true },
+  });
+  if (!row) return undefined;
+  const run = row.data as unknown as ResearchRun;
+  // A run cancelled by hand in the database (only the stage column changed) stays cancelled.
+  if (row.stage === "cancelled" && run.stage !== "cancelled") {
+    run.stage = "cancelled";
+    run.currentStep = null;
+  }
+  return run;
 }
 
 // Saves for one run are chained so an older snapshot never overwrites a newer one.

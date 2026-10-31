@@ -271,6 +271,8 @@ export type RunCounts = {
 
 export type ResearchRun = {
   runId: string;
+  /** Name of the account that started the run (absent for runs from before accounts). */
+  startedBy?: string;
   /** Source ids chosen for this run; the discovery step reads them. */
   sourceIds: string[];
   /** Verification pass in progress, kept between step requests (budgets and time count from its start). */

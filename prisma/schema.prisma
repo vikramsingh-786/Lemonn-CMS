@@ -22,6 +22,9 @@ model ResearchRun {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   articles      Article[]
+  /// Who started the run (null for runs from before accounts existed).
+  createdById   String?   @db.Uuid
+  createdBy     User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([stage, updatedAt])
 }
@@ -49,7 +52,51 @@ model Article {
   version        Int         @default(1)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
+  /// Who saved it last (null for edits from before accounts existed).
+  updatedById    String?     @db.Uuid
+  updatedBy      User?       @relation(fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@unique([runId, candidateId])
   @@index([status, updatedAt])
+}
+
+/// A CMS account. Grant access by changing `role` here: admin | team | user.
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  /// Lower-cased; one account per address.
+  email        String        @unique
+  name         String
+  /// scrypt hash with its parameters and salt (never the password).
+  passwordHash String
+  /// admin: everything, incl. the user list · team: research and article editing · user: read-only
+  role         String        @default("user")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sessions     Session[]
+  runs         ResearchRun[]
+  articles     Article[]
+}
+
+/// A signed-in browser. The cookie holds a random token; only its SHA-256 is stored here, so
+/// this table can't be used to sign in. Deleting a row signs that browser out.
+model Session {
+  /// SHA-256 (hex) of the cookie token.
+  id         String   @id
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Idle timeout: pushed forward while the session is used.
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// Failed sign-ins and sign-ups, for attempt limiting ("ip:<address>" or "email:<address>").
+model LoginAttempt {
+  id        String   @id @default(uuid()) @db.Uuid
+  key       String
+  createdAt DateTime @default(now())
+
+  @@index([key, createdAt])
 }

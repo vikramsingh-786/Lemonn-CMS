@@ -81,7 +81,10 @@ export function ArticlesList({ articles }: { articles: ArticleSummary[] }) {
                       {STATUS_LABEL[a.status]}
                     </Badge>
                     <Badge variant="outline">{a.category}</Badge>
-                    <span className="text-muted-foreground">Edited {formatIst(a.updatedAt)}</span>
+                    <span className="text-muted-foreground">
+                      Edited {formatIst(a.updatedAt)}
+                      {a.updatedByName && ` by ${a.updatedByName}`}
+                    </span>
                   </div>
                   <p className="mt-1.5 line-clamp-2 font-medium">{a.headline}</p>
                 </div>

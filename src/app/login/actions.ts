@@ -1,46 +1,66 @@
 "use server";
 
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import {
-  SESSION_COOKIE,
-  SESSION_MAX_AGE_S,
-  createSessionToken,
-  passwordMatches,
+  clearAttempts,
+  clientIp,
+  createSession,
+  endSession,
+  isLimited,
+  recordAttempt,
   safeNextPath,
-} from "@/lib/session";
+} from "@/lib/auth";
+import { db } from "@/lib/db";
+import { DUMMY_HASH, verifyPassword } from "@/lib/password";
 
-export type LoginState = { error: string | null };
+/** The form's result; `values` refill the fields React clears after a submission (never passwords). */
+export type AuthFormState = { error: string | null; values?: { email?: string; name?: string } };
+
+const UNAVAILABLE = "Sign-in is unavailable right now. Try again in a minute.";
 
 const loginSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(200),
   password: z.string().min(1).max(200),
   next: z.string().max(500).optional(),
 });
 
-/** Checks the password, sets the signed session cookie and returns to the requested page. */
-export async function login(_previous: LoginState, form: FormData): Promise<LoginState> {
+/** Checks email + password (with attempt limits), starts a session and returns to `next`. */
+export async function login(_previous: AuthFormState, form: FormData): Promise<AuthFormState> {
   const parsed = loginSchema.safeParse({
+    email: form.get("email"),
     password: form.get("password"),
     next: form.get("next") ?? undefined,
   });
-  if (!parsed.success) return { error: "Enter the password." };
-  if (!(await passwordMatches(parsed.data.password))) {
-    await new Promise((resolve) => setTimeout(resolve, 1000)); // slows down guessing
-    return { error: "Wrong password." };
+  const typed = { email: String(form.get("email") ?? "").slice(0, 200) };
+  if (!parsed.success) return { error: "Enter your email and password.", values: typed };
+  const { email, password, next } = parsed.data;
+  try {
+    const ip = await clientIp();
+    const keys = [
+      { key: `email:${email}`, limit: "email" as const },
+      { key: `ip:${ip}`, limit: "ip" as const },
+    ];
+    if (await isLimited(keys))
+      return { error: "Too many failed attempts. Wait 15 minutes and try again.", values: typed };
+    const user = await db().user.findUnique({ where: { email } });
+    // Always run the hash check, so a missing account takes as long as a wrong password.
+    const ok = await verifyPassword(password, user?.passwordHash ?? DUMMY_HASH);
+    if (!user || !ok) {
+      await recordAttempt(keys.map((k) => k.key));
+      return { error: "Wrong email or password.", values: typed };
+    }
+    await clearAttempts(`email:${email}`);
+    await createSession(user.id);
+  } catch (e) {
+    console.error("sign-in failed", e);
+    return { error: UNAVAILABLE, values: typed };
   }
-  (await cookies()).set(SESSION_COOKIE, await createSessionToken(), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: SESSION_MAX_AGE_S,
-  });
-  redirect(safeNextPath(parsed.data.next));
+  redirect(safeNextPath(next));
 }
 
-/** Clears the session and returns to the sign-in page. */
+/** Ends this browser's session for real (the session row is deleted) and goes to sign-in. */
 export async function logout() {
-  (await cookies()).delete(SESSION_COOKIE);
+  await endSession().catch((e: unknown) => console.error("sign-out failed", e));
   redirect("/login");
 }

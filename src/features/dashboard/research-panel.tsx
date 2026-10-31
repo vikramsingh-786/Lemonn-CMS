@@ -89,6 +89,8 @@ type ResearchPanelProps = {
   enabledSources: number;
   totalSources: number;
   onResearch: () => void;
+  /** Read-only roles get no Retry button. */
+  canRun?: boolean;
 };
 
 /** Right-hand control panel: what will be searched, live pipeline state, and the action. */
@@ -99,6 +101,7 @@ export function ResearchPanel({
   enabledSources,
   totalSources,
   onResearch,
+  canRun = true,
 }: ResearchPanelProps) {
   const states = stepStates(status, run);
   const running = status === "running";
@@ -205,16 +208,18 @@ export function ResearchPanel({
             <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
             {error}
           </p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="self-start"
-            onClick={onResearch}
-            disabled={enabledSources === 0}
-          >
-            <RotateCw aria-hidden />
-            Retry
-          </Button>
+          {canRun && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={onResearch}
+              disabled={enabledSources === 0}
+            >
+              <RotateCw aria-hidden />
+              Retry
+            </Button>
+          )}
         </div>
       )}
     </section>

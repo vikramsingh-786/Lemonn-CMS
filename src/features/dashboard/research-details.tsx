@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { DiscoveredStories } from "./discovered-stories";
 import { ResearchFeed } from "./research-panel";
 import { ResearchProgress } from "./research-progress";
+import { can, type SessionUser } from "@/lib/roles";
 import { useResearchRun } from "./use-research-run";
 import { VerificationReview } from "./verification-review";
 
@@ -14,8 +15,9 @@ import { VerificationReview } from "./verification-review";
  * Internal view of one run: pipeline counts, source coverage, discovered and ranked stories,
  * verification evidence and the live feed. Drives the run while it is unfinished, like the home.
  */
-export function ResearchDetails({ runId }: { runId: string }) {
-  const { run, status, error, notFound, running, load, retry } = useResearchRun();
+export function ResearchDetails({ runId, user }: { runId: string; user: SessionUser }) {
+  const canRun = can(user.role, "research:run");
+  const { run, status, error, notFound, running, load, retry } = useResearchRun(canRun);
 
   useEffect(() => {
     void load(runId);
@@ -39,7 +41,10 @@ export function ResearchDetails({ runId }: { runId: string }) {
           <p className="mt-2 max-w-2xl text-sm text-muted-foreground sm:text-base">
             How this run found, ranked and verified its stories. Final drafts are on the dashboard.
           </p>
-          <p className="mt-2 font-mono text-xs text-muted-foreground">Run {runId}</p>
+          <p className="mt-2 font-mono text-xs text-muted-foreground">
+            Run {runId}
+            {run?.startedBy && <span className="font-sans"> · started by {run.startedBy}</span>}
+          </p>
         </div>
       </div>
 
@@ -65,7 +70,11 @@ export function ResearchDetails({ runId }: { runId: string }) {
           <div className="flex min-w-0 flex-col gap-5">
             <ResearchProgress run={run} />
             <DiscoveredStories run={run} />
-            <VerificationReview run={run} onRetry={() => void retry("verify")} retrying={running} />
+            <VerificationReview
+              run={run}
+              onRetry={canRun ? () => void retry("verify") : undefined}
+              retrying={running}
+            />
           </div>
         </div>
       )}

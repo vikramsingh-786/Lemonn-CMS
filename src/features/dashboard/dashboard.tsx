@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import type { ArticleSummary } from "@/features/articles/types";
 import type { ConfiguredSource, ResearchDraft } from "@/features/research/types";
+import { can, type SessionUser } from "@/lib/roles";
 import { ArticleReview } from "./article-review";
 import { DashboardSummary } from "./dashboard-summary";
 import { DEFAULT_SOURCES, sourceDomain } from "./data";
@@ -30,7 +31,9 @@ const INITIAL_SOURCES: ConfiguredSource[] = DEFAULT_SOURCES.map((s) => ({
  * (discovered and ranked stories, verification) live on /research/[runId]. Runs are saved in the
  * CMS database; nothing is published or sent to lemonn.co.in.
  */
-export function Dashboard() {
+export function Dashboard({ user }: { user: SessionUser }) {
+  const canRun = can(user.role, "research:run");
+  const canEdit = can(user.role, "articles:edit");
   const [sources, setSources] = useState<ConfiguredSource[]>(INITIAL_SOURCES);
   const [articles, setArticles] = useState<Record<string, ArticleSummary>>({});
   const [opening, setOpening] = useState<string | null>(null);
@@ -38,7 +41,7 @@ export function Dashboard() {
   const router = useRouter();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const { run, status, error, notice, running, load, loadCurrent, start, retry, cancel } =
-    useResearchRun();
+    useResearchRun(canRun);
   const runId = run?.runId;
   const draftCount = run?.drafts.length ?? 0;
 
@@ -70,6 +73,12 @@ export function Dashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ runId, candidateId: draft.candidateId }),
     }).catch(() => null);
+    if (response?.status === 401) {
+      router.push(
+        `/login?expired=1&next=${encodeURIComponent(window.location.pathname + window.location.search)}`,
+      );
+      return;
+    }
     const data = response?.ok ? ((await response.json()) as { id: string }) : null;
     if (data) router.push(`/articles/${data.id}`);
     else {
@@ -125,6 +134,7 @@ export function Dashboard() {
           enabledSources={enabledSources}
           onResearch={runResearch}
           onCancel={() => setConfirmCancel(true)}
+          readOnly={!canRun}
           className="shrink-0"
         />
       </div>
@@ -159,6 +169,7 @@ export function Dashboard() {
             enabledSources={enabledSources}
             totalSources={sources.length}
             onResearch={runResearch}
+            canRun={canRun}
           />
           {run && (
             <Link
@@ -186,6 +197,8 @@ export function Dashboard() {
             cancelled={status === "cancelled"}
             articles={articles}
             onEdit={(draft) => void editDraft(draft)}
+            canEdit={canEdit}
+            canRun={canRun}
             opening={opening}
             pending={(run?.draftQueue ?? [])
               .filter((q) => !drafts.some((d) => d.candidateId === q.candidateId))
@@ -198,7 +211,7 @@ export function Dashboard() {
             onToggle={(id, enabled) =>
               setSources((prev) => prev.map((s) => (s.id === id ? { ...s, enabled } : s)))
             }
-            disabled={running}
+            disabled={running || !canRun}
           />
         </div>
       </div>

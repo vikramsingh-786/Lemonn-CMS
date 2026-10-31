@@ -26,10 +26,15 @@ export function needsTavily(source: NewsSource): boolean {
 }
 
 /** A new run for `sources` over `window`; nothing runs until its first step. */
-export function newRun(sources: readonly NewsSource[], window: ResearchRun["window"]): ResearchRun {
+export function newRun(
+  sources: readonly NewsSource[],
+  window: ResearchRun["window"],
+  startedBy?: string,
+): ResearchRun {
   const runId = randomUUID();
   const run: ResearchRun = {
     runId,
+    ...(startedBy && { startedBy }),
     sourceIds: sources.map((s) => s.id),
     window,
     stage: "discovering",
