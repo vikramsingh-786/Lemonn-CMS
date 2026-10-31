@@ -30,6 +30,11 @@ export function useResearchRun() {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const mounted = useRef(true);
+  /** The run this page is driving, and whether the editor asked to stop it. */
+  const current = useRef<string | null>(null);
+  const stopped = useRef(false);
+  /** Cancel clicked while the run was still being created (no Run ID yet): done once it exists. */
+  const cancelPending = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -47,7 +52,9 @@ export function useResearchRun() {
   const follow = useCallback(async (runId: string) => {
     const startedAt = Date.now();
     let failures = 0;
-    while (mounted.current) {
+    current.current = runId;
+    stopped.current = false;
+    while (mounted.current && !stopped.current) {
       if (Date.now() - startedAt > MAX_RUN_MS) {
         throw new Error("Research is taking too long. Reopen this run later to continue.");
       }
@@ -74,8 +81,13 @@ export function useResearchRun() {
       }
       failures = 0;
       const snapshot = (await response.json()) as ResearchRun;
-      if (!mounted.current) return;
+      // Cancelled while this step ran: keep the cancelled snapshot that cancel() showed.
+      if (!mounted.current || stopped.current) return;
       setRun(snapshot);
+      if (snapshot.stage === "cancelled") {
+        setStatus("cancelled");
+        return;
+      }
       if (snapshot.stage === "failed")
         throw new Error(snapshot.error?.message ?? "Research failed.");
       if (snapshot.stage === "completed") {
@@ -100,7 +112,9 @@ export function useResearchRun() {
       }
       const snapshot = (await response.json()) as ResearchRun;
       setRun(snapshot);
+      current.current = runId;
       if (snapshot.stage === "completed") setStatus("done");
+      else if (snapshot.stage === "cancelled") setStatus("cancelled");
       else if (snapshot.stage === "failed") {
         setError(snapshot.error?.message ?? "Research failed.");
         setStatus("error");
@@ -113,12 +127,47 @@ export function useResearchRun() {
     [follow, fail],
   );
 
+  /** Cancels `runId` on the server; if it finished meanwhile, shows it as it finished. */
+  const cancelOnServer = useCallback(
+    async (runId: string) => {
+      const response = await fetch(`/api/research/${runId}/cancel`, { method: "POST" }).catch(
+        () => null,
+      );
+      if (!mounted.current) return;
+      if (response?.ok) {
+        setRun((await response.json()) as ResearchRun);
+        setError(null);
+        setStatus("cancelled");
+      } else {
+        // Already finished (409) or unreachable: show the run's real state again.
+        await load(runId);
+      }
+    },
+    [load],
+  );
+
+  /**
+   * Stops the run this page is driving. Work already finished is kept; a new run can start at
+   * once. Clicked before the run exists, it cancels the run as soon as it is created.
+   */
+  const cancel = useCallback(async () => {
+    stopped.current = true;
+    const runId = current.current;
+    if (!runId) {
+      cancelPending.current = true;
+      return;
+    }
+    await cancelOnServer(runId);
+  }, [cancelOnServer]);
+
   /** Starts a run for the given sources; `onCreated` gets its Run ID as soon as it exists. */
   const start = useCallback(
     async (sources: { id: string; enabled: boolean }[], onCreated?: (runId: string) => void) => {
       setStatus("running");
       setError(null);
       setRun(null);
+      current.current = null;
+      cancelPending.current = false;
       try {
         const response = await fetch("/api/research", {
           method: "POST",
@@ -128,13 +177,19 @@ export function useResearchRun() {
         if (!response.ok)
           throw new Error(await readError(response, `Research failed (${response.status}).`));
         const { runId } = (await response.json()) as StartRunResponse;
+        current.current = runId;
         onCreated?.(runId);
+        if (cancelPending.current) {
+          cancelPending.current = false;
+          await cancelOnServer(runId);
+          return;
+        }
         await follow(runId);
       } catch (e) {
         fail(e);
       }
     },
-    [follow, fail],
+    [follow, fail, cancelOnServer],
   );
 
   /**
@@ -158,5 +213,15 @@ export function useResearchRun() {
     [run, follow, fail],
   );
 
-  return { run, status, error, notFound, running: status === "running", load, start, retry };
+  return {
+    run,
+    status,
+    error,
+    notFound,
+    running: status === "running",
+    load,
+    start,
+    retry,
+    cancel,
+  };
 }

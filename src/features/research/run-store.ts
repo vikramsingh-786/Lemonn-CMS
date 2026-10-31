@@ -4,7 +4,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import type { ResearchRun } from "./types";
 
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const FINISHED_STAGES = ["completed", "failed"];
+const FINISHED_STAGES = ["completed", "failed", "cancelled"];
 /** A run with no step for this long is abandoned and no longer blocks a new run. */
 const ACTIVE_MS = 30 * 60_000;
 
@@ -52,7 +52,12 @@ export function saveRun(run: ResearchRun): Promise<void> {
   const data = json(structuredClone(run));
   const next = (writes.get(run.runId) ?? Promise.resolve())
     .then(async () => {
-      await db().researchRun.update({ where: { id: run.runId }, data: { stage: run.stage, data } });
+      // A cancelled run stays cancelled: a step still running when the editor cancelled must not
+      // write its (older) stage back over the cancellation.
+      await db().researchRun.updateMany({
+        where: { id: run.runId, stage: { not: "cancelled" } },
+        data: { stage: run.stage, data },
+      });
     })
     .catch((e: unknown) => console.error("saveRun failed", run.runId, e));
   writes.set(run.runId, next);

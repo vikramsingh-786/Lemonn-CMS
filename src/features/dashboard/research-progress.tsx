@@ -16,6 +16,7 @@ const STAGE_LABEL: Record<ResearchRun["stage"], string> = {
   processing: "Verifying claims",
   completed: "Completed",
   failed: "Failed",
+  cancelled: "Cancelled",
 };
 
 const ERROR_LABEL: Record<string, string> = {

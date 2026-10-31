@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import type { ArticleSummary } from "@/features/articles/types";
 import type { ConfiguredSource, ResearchDraft } from "@/features/research/types";
 import { ArticleReview } from "./article-review";
@@ -34,7 +36,8 @@ export function Dashboard() {
   const [opening, setOpening] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const router = useRouter();
-  const { run, status, error, running, load, start, retry } = useResearchRun();
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const { run, status, error, running, load, start, retry, cancel } = useResearchRun();
   const runId = run?.runId;
   const draftCount = run?.drafts.length ?? 0;
 
@@ -113,6 +116,7 @@ export function Dashboard() {
           status={status}
           enabledSources={enabledSources}
           onResearch={runResearch}
+          onCancel={() => setConfirmCancel(true)}
           className="shrink-0"
         />
       </div>
@@ -165,6 +169,7 @@ export function Dashboard() {
           <ArticleReview
             drafts={drafts}
             hasRun={status === "done" || (run !== null && !running)}
+            cancelled={status === "cancelled"}
             articles={articles}
             onEdit={(draft) => void editDraft(draft)}
             opening={opening}
@@ -183,6 +188,29 @@ export function Dashboard() {
           />
         </div>
       </div>
+      <Dialog
+        open={confirmCancel && running}
+        onClose={() => setConfirmCancel(false)}
+        title="Cancel this research run?"
+        actions={
+          <>
+            <Button variant="outline" onClick={() => setConfirmCancel(false)}>
+              Keep running
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirmCancel(false);
+                void cancel();
+              }}
+            >
+              Cancel research
+            </Button>
+          </>
+        }
+      >
+        Stories, verifications and drafts finished so far are kept; nothing else will be verified or
+        drafted. You can start a new run right away.
+      </Dialog>
     </>
   );
 }

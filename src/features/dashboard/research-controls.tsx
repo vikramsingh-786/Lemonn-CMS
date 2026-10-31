@@ -1,4 +1,4 @@
-import { ArrowRight, LoaderCircle } from "lucide-react";
+import { ArrowRight, CircleStop, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ResearchStatus } from "./data";
@@ -7,6 +7,8 @@ type ResearchControlsProps = {
   status: ResearchStatus;
   enabledSources: number;
   onResearch: () => void;
+  /** Shown while researching: stops the run (the caller confirms first). */
+  onCancel?: () => void;
   className?: string;
 };
 
@@ -20,6 +22,7 @@ export function ResearchControls({
   status,
   enabledSources,
   onResearch,
+  onCancel,
   className,
 }: ResearchControlsProps) {
   const running = status === "running";
@@ -46,7 +49,14 @@ export function ResearchControls({
           </>
         )}
       </Button>
-      <p className="text-xs text-muted-foreground">{researchHint(enabledSources)}</p>
+      {running && onCancel ? (
+        <Button variant="outline" size="sm" onClick={onCancel}>
+          <CircleStop aria-hidden />
+          Cancel research
+        </Button>
+      ) : (
+        <p className="text-xs text-muted-foreground">{researchHint(enabledSources)}</p>
+      )}
     </div>
   );
 }
