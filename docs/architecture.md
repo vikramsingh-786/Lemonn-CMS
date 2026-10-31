@@ -15,7 +15,7 @@ then calls `POST /api/research/[runId]/step` in a loop, and each call does one b
 work and saves it (`pipeline.ts`): discover → rank → verify 3 stories per step → draft 2 per step
 → completed. A per-run lock in the database (`stepLockUntil`) lets one request work on a run at a
 time; a cut-off step is repeated by the next one. This fits serverless limits (Vercel: 300 s per
-request). Closing the tab pauses a run; reopening `?run=<id>` resumes it. Discovery reads
+request). A run belongs to the account that started it: only that account's pages (or an admin's) drive, retry or cancel it; everyone else's pages watch it. Admins manage every run on `/admin/runs`: stop a running one, resume a stopped, cancelled or failed one where it stopped (`prepareResume`), or delete one with its articles. Closing the tab pauses a run; reopening it within 30 minutes resumes it. After 30 minutes without progress it is stopped for good (`getRun`), so an old run is never resumed on a stale window. Discovery reads
 publishers' Google News sitemaps (config in `src/features/research/sitemaps.ts`) or, for sources
 without one, searches Tavily. It keeps stories from the last 24 hours on 7 topics
 (`src/features/research/topics.ts`), at most 200 per source. Publisher fetches go through

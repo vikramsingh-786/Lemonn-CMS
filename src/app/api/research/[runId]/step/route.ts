@@ -1,6 +1,6 @@
-import { runStep } from "@/features/research/pipeline";
+import { ownerBlock, runStep } from "@/features/research/pipeline";
 import { requireApi } from "@/lib/auth";
-import { claimStep, getRun, isRunId, releaseStep, saveRun } from "@/features/research/run-store";
+import { claimStep, getRun, releaseStep, saveRun } from "@/features/research/run-store";
 import type { ApiErrorBody } from "@/features/research/types";
 import { serverEnv } from "@/lib/env";
 
@@ -27,11 +27,15 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/research/[
   const auth = await requireApi("research:run");
   if (auth.denied) return auth.denied;
   const { runId } = await ctx.params;
-  if (!isRunId(runId)) return error(404, "not_found", "Research run not found.");
+  const owned = await getRun(runId);
+  if (!owned) return error(404, "not_found", "Research run not found.");
+  // Before taking the lock, so another account can never hold the owner's run.
+  const blocked = ownerBlock(owned, auth.user, "continue");
+  if (blocked) return error(403, "forbidden", blocked);
   if (!(await claimStep(runId, LOCK_MS)))
     return error(409, "busy", "This run is being worked on; try again shortly.", true);
   try {
-    const run = await getRun(runId);
+    const run = await getRun(runId); // fresh, now that this request holds the run
     if (!run) return error(404, "not_found", "Research run not found.");
     await runStep(run, serverEnv());
     await saveRun(run);

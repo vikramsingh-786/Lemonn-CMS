@@ -1,14 +1,17 @@
-import { ArrowRight, CircleStop, LoaderCircle } from "lucide-react";
+import { ArrowRight, LoaderCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { CancelResearch } from "./cancel-research";
 import type { ResearchStatus } from "./data";
 
 type ResearchControlsProps = {
   status: ResearchStatus;
   enabledSources: number;
   onResearch: () => void;
-  /** Shown while researching: stops the run (the caller confirms first). */
+  /** Present while the run can be cancelled by this account: stops it (after a confirmation). */
   onCancel?: () => void;
+  /** This page is driving the run (it only moves while the page stays open). */
+  driving?: boolean;
   /** The role can't run research: show who can, instead of the button. */
   readOnly?: boolean;
   className?: string;
@@ -26,6 +29,7 @@ export function ResearchControls({
   onResearch,
   onCancel,
   readOnly = false,
+  driving = false,
   className,
 }: ResearchControlsProps) {
   const running = status === "running";
@@ -63,13 +67,14 @@ export function ResearchControls({
           </>
         )}
       </Button>
-      {running && onCancel ? (
-        <Button variant="outline" size="sm" onClick={onCancel}>
-          <CircleStop aria-hidden />
-          Cancel research
-        </Button>
+      {onCancel && <CancelResearch onCancel={onCancel} />}
+      {driving ? (
+        <p className="max-w-xs text-xs text-muted-foreground sm:text-right">
+          Keep this page open: research moves only while it is open. Opening a draft pauses it until
+          you come back.
+        </p>
       ) : (
-        <p className="text-xs text-muted-foreground">{researchHint(enabledSources)}</p>
+        !onCancel && <p className="text-xs text-muted-foreground">{researchHint(enabledSources)}</p>
       )}
     </div>
   );

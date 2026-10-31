@@ -8,7 +8,7 @@ const COVERAGE_ICON: Record<SourceCoverage["status"], React.ReactNode> = {
   failed: <CircleAlert aria-hidden className="size-3.5 text-destructive" />,
 };
 
-const STAGE_LABEL: Record<ResearchRun["stage"], string> = {
+export const STAGE_LABEL: Record<ResearchRun["stage"], string> = {
   discovering: "Discovering stories",
   expanding: "Expanding search",
   ranking: "Cleaning and ranking",

@@ -11,10 +11,12 @@ export type Permission =
   /** Open drafts as articles, edit them, mark ready or rejected. */
   | "articles:edit"
   /** See every account and change roles (admin page). */
-  | "users:manage";
+  | "users:manage"
+  /** Any run, whoever owns it: continue, stop, resume, retry and delete (admin page). */
+  | "runs:manage";
 
 const GRANTS: Record<Role, readonly Permission[]> = {
-  admin: ["research:run", "articles:edit", "users:manage"],
+  admin: ["research:run", "articles:edit", "users:manage", "runs:manage"],
   team: ["research:run", "articles:edit"],
   user: [],
 };
@@ -35,3 +37,15 @@ export const ROLE_LABEL: Record<Role, string> = {
 
 /** The signed-in account as pages and components see it (never the password hash). */
 export type SessionUser = { id: string; email: string; name: string; role: Role };
+
+/**
+ * A research run belongs to the account that started it: only that account, or an admin
+ * (runs:manage), continues, retries, resumes or cancels it. Runs from before accounts have no
+ * owner. Read-only roles never may.
+ */
+export function mayManageRun(startedById: string | null | undefined, user: SessionUser): boolean {
+  return (
+    can(user.role, "research:run") &&
+    (!startedById || startedById === user.id || can(user.role, "runs:manage"))
+  );
+}

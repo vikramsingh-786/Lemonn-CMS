@@ -93,6 +93,7 @@ const ACTION_LABEL: Record<Permission, string> = {
   "research:run": "run research",
   "articles:edit": "edit articles",
   "users:manage": "manage accounts",
+  "runs:manage": "manage research runs",
 };
 
 /**

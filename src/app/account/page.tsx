@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { LogOut, Users } from "lucide-react";
+import { LogOut, Users, ListChecks } from "lucide-react";
 import { logout } from "@/app/login/actions";
 import { AppShell } from "@/components/layout/app-shell";
 import { Badge } from "@/components/ui/badge";
@@ -58,6 +58,15 @@ async function Account() {
               >
                 <Users aria-hidden className="size-4" />
                 All accounts
+              </Link>
+            )}
+            {can(user.role, "runs:manage") && (
+              <Link
+                href="/admin/runs"
+                className="pill-raised inline-flex h-9 items-center gap-2 rounded-full bg-muted px-4 text-xs font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <ListChecks aria-hidden className="size-4" />
+                All research runs
               </Link>
             )}
             <form action={logout}>

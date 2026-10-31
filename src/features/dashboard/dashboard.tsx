@@ -5,8 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Dialog } from "@/components/ui/dialog";
 import type { ArticleSummary } from "@/features/articles/types";
 import type { ConfiguredSource, ResearchDraft } from "@/features/research/types";
 import { can, type SessionUser } from "@/lib/roles";
@@ -39,9 +37,20 @@ export function Dashboard({ user }: { user: SessionUser }) {
   const [opening, setOpening] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const router = useRouter();
-  const [confirmCancel, setConfirmCancel] = useState(false);
-  const { run, status, error, notice, running, load, loadCurrent, start, retry, cancel } =
-    useResearchRun(canRun);
+  const {
+    run,
+    status,
+    error,
+    notice,
+    running,
+    canRetry,
+    canCancel,
+    load,
+    loadCurrent,
+    start,
+    retry,
+    cancel,
+  } = useResearchRun(user);
   const runId = run?.runId;
   const draftCount = run?.drafts.length ?? 0;
 
@@ -133,7 +142,8 @@ export function Dashboard({ user }: { user: SessionUser }) {
           status={status}
           enabledSources={enabledSources}
           onResearch={runResearch}
-          onCancel={() => setConfirmCancel(true)}
+          onCancel={canCancel ? () => void cancel() : undefined}
+          driving={running && canRetry}
           readOnly={!canRun}
           className="shrink-0"
         />
@@ -198,7 +208,7 @@ export function Dashboard({ user }: { user: SessionUser }) {
             articles={articles}
             onEdit={(draft) => void editDraft(draft)}
             canEdit={canEdit}
-            canRun={canRun}
+            canRun={canRetry}
             opening={opening}
             pending={(run?.draftQueue ?? [])
               .filter((q) => !drafts.some((d) => d.candidateId === q.candidateId))
@@ -215,29 +225,6 @@ export function Dashboard({ user }: { user: SessionUser }) {
           />
         </div>
       </div>
-      <Dialog
-        open={confirmCancel && running}
-        onClose={() => setConfirmCancel(false)}
-        title="Cancel this research run?"
-        actions={
-          <>
-            <Button variant="outline" onClick={() => setConfirmCancel(false)}>
-              Keep running
-            </Button>
-            <Button
-              onClick={() => {
-                setConfirmCancel(false);
-                void cancel();
-              }}
-            >
-              Cancel research
-            </Button>
-          </>
-        }
-      >
-        Stories, verifications and drafts finished so far are kept; nothing else will be verified or
-        drafted. You can start a new run right away.
-      </Dialog>
     </>
   );
 }

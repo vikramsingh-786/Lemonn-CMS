@@ -3,7 +3,9 @@ import type { ServerEnv } from "@/lib/env";
 import { discoverStep } from "./discovery";
 import { draftStep } from "./draft";
 import { rankRun } from "./rank";
+import { stopRun } from "./run-store";
 import type { ResearchRun } from "./types";
+import { mayManageRun, type SessionUser } from "@/lib/roles";
 import { beginVerifyPass, verifyStep } from "./verify";
 
 /**
@@ -101,21 +103,50 @@ export function prepareDraftRetry(run: ResearchRun): string | null {
  * is kept, and a new run can start right away. A step already running finishes its current piece,
  * but its save is ignored (see saveRun). Returns why it can't, or null.
  */
-export function cancelRun(run: ResearchRun): string | null {
+export function cancelRun(run: ResearchRun, by?: string): string | null {
   if (isFinished(run)) return "This run has already finished.";
-  run.stage = "cancelled";
-  run.currentStep = null;
-  run.error = null;
-  run.finishedAt = new Date().toISOString();
-  run.stageDetail = "Cancelled by an editor; finished steps are kept";
-  for (const c of run.candidates) {
-    if (c.status === "queued" || c.status === "pending_evidence" || c.status === "verifying") {
-      c.status = "not_processed";
-      c.statusReason = "Not verified: the research run was cancelled.";
-    }
+  stopRun(run, `Cancelled${by ? ` by ${by}` : ""}; finished steps are kept`);
+  return null;
+}
+
+/**
+ * Why `user` may not act on `run`, or null. A run belongs to the account that started it: only
+ * that account (or an admin) continues, retries, resumes or cancels it. Runs from before
+ * accounts have no owner.
+ */
+export function ownerBlock(
+  run: ResearchRun,
+  user: SessionUser,
+  action: "continue" | "retry" | "resume" | "cancel",
+): string | null {
+  if (mayManageRun(run.startedById, user)) return null;
+  return `Only ${run.startedBy ?? "the person who started it"} can ${action} this research run.`;
+}
+
+/**
+ * Restarts a stopped, cancelled or failed run where it stopped (same Run ID and window):
+ * discovery again if it found nothing yet, ranking if nothing was ranked, otherwise verification
+ * of the stories not verified yet, then drafting. Returns why it can't, or null.
+ */
+export function prepareResume(run: ResearchRun, env: ServerEnv, by: string): string | null {
+  if (run.stage !== "cancelled" && run.stage !== "failed")
+    return run.stage === "completed"
+      ? "This run is complete; use its retry buttons instead."
+      : "This run is still in progress.";
+  reopen(run, "processing");
+  if (run.candidates.length > 0) {
+    beginVerifyPass(run, env, true);
+    for (const q of run.draftQueue) delete q.draftError;
+    delete run.draftPass;
+  } else if (run.items.length > 0) {
+    run.stage = "ranking";
+    run.currentStep = "rank";
+  } else {
+    run.stage = "discovering";
+    run.currentStep = "discover";
+    run.coverage = [];
+    run.topicCounts = {};
   }
-  run.counts.notProcessed = run.candidates.filter((c) => c.status === "not_processed").length;
-  delete run.verifyPass;
-  delete run.draftPass;
+  run.stageDetail = `Resumed by ${by}`;
   return null;
 }

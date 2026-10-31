@@ -8,6 +8,7 @@ import type {
   ResearchRun,
   StartRunResponse,
 } from "@/features/research/types";
+import { mayManageRun, type SessionUser } from "@/lib/roles";
 import type { ResearchStatus } from "./data";
 
 /** Wait before asking again when another tab is running this run's step. */
@@ -36,12 +37,12 @@ function loginUrl() {
 /**
  * One research run as seen by a page: load it, start it, retry a stage, and drive it to the end.
  * Each POST /step does one bounded piece of work on the server and returns the saved snapshot.
- * Any open page drives an unfinished run (the dashboard and the research page alike); the
- * server's per-run lock makes a second page wait (409) and show the other's progress instead.
- * `canRun` false (read-only role): the page only watches (polls) a run and never drives it, so
- * it can't spend API credits. A 401 sends the editor to sign in and back here.
+ * A run belongs to the account that started it: only that account's open pages (or an admin's)
+ * drive it (the dashboard and the research page alike; the server's per-run lock makes a second
+ * tab wait). Every other page only watches (polls) it, so it can't spend API credits.
+ * A 401 sends the editor to sign in and back here.
  */
-export function useResearchRun(canRun = true) {
+export function useResearchRun(user: SessionUser) {
   const [run, setRun] = useState<ResearchRun | null>(null);
   const [status, setStatus] = useState<ResearchStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +72,7 @@ export function useResearchRun(canRun = true) {
   }, []);
 
   const follow = useCallback(
-    async (runId: string) => {
+    async (runId: string, drive: boolean) => {
       const startedAt = Date.now();
       let failures = 0;
       current.current = runId;
@@ -80,12 +81,12 @@ export function useResearchRun(canRun = true) {
         if (Date.now() - startedAt > MAX_RUN_MS) {
           throw new Error("Research is taking too long. Reopen this run later to continue.");
         }
-        const response = canRun
+        const response = drive
           ? await fetch(`/api/research/${runId}/step`, { method: "POST" }).catch(() => null)
           : await sleep(WATCH_MS).then(() => fetch(`/api/research/${runId}`).catch(() => null));
         if (response?.status === 401) return toLogin();
         if (response?.status === 403)
-          throw new Error(await readError(response, "Your role can't run research."));
+          throw new Error(await readError(response, "You can't continue this research run."));
         if (response?.status === 409) {
           // Another tab or request is working on this run: show its progress and wait.
           await sleep(BUSY_WAIT_MS);
@@ -121,10 +122,13 @@ export function useResearchRun(canRun = true) {
         }
       }
     },
-    [canRun, toLogin],
+    [toLogin],
   );
 
-  /** Shows a saved run and keeps driving it if it is unfinished. False when it doesn't exist. */
+  /**
+   * Shows a saved run and, while it is unfinished, keeps driving it (own run) or watching it
+   * (someone else's). False when it doesn't exist.
+   */
   const load = useCallback(
     async (runId: string): Promise<boolean> => {
       if (!RUN_ID.test(runId)) {
@@ -150,12 +154,17 @@ export function useResearchRun(canRun = true) {
         setError(snapshot.error?.message ?? "Research failed.");
         setStatus("error");
       } else {
+        const own = mayManageRun(snapshot.startedById, user);
+        if (!own)
+          setNotice(
+            `${snapshot.startedBy ?? "Another editor"} is running this research; you're watching it. It moves while their page is open.`,
+          );
         setStatus("running");
-        await follow(runId).catch(fail);
+        await follow(runId, own).catch(fail);
       }
       return true;
     },
-    [follow, fail, toLogin],
+    [follow, fail, toLogin, user],
   );
 
   /** Cancels `runId` on the server; if it finished meanwhile, shows it as it finished. */
@@ -213,7 +222,7 @@ export function useResearchRun(canRun = true) {
           // moving instead of leaving the editor at a dead end.
           const body = (await response.json().catch(() => null)) as ApiErrorBody | null;
           if (body?.runId) {
-            setNotice("A research run was already in progress, so it is shown here and continues.");
+            setNotice("A research run was already in progress, so it is shown here instead.");
             onCreated?.(body.runId);
             await load(body.runId);
             return;
@@ -230,7 +239,7 @@ export function useResearchRun(canRun = true) {
           await cancelOnServer(runId);
           return;
         }
-        await follow(runId);
+        await follow(runId, true);
       } catch (e) {
         fail(e);
       }
@@ -253,14 +262,10 @@ export function useResearchRun(canRun = true) {
     const runId = activeRunId ?? latestRunId;
     if (!runId) return null;
     if (activeRunId)
-      setNotice(
-        canRun
-          ? "Research in progress: showing it and continuing where it left off."
-          : "Research in progress: you're watching it (read-only); it advances while a team member has it open.",
-      );
-    void load(runId);
+      setNotice("Research in progress: showing it and continuing where it left off.");
+    void load(runId); // replaces the notice when the run is someone else's
     return runId;
-  }, [load, canRun, toLogin]);
+  }, [load, toLogin]);
 
   /**
    * Re-runs one stage of the current run (same Run ID): "verify" re-verifies failed / unfinished
@@ -276,13 +281,17 @@ export function useResearchRun(canRun = true) {
         if (response.status === 401) return toLogin();
         if (!response.ok)
           throw new Error(await readError(response, `Retry failed (${response.status}).`));
-        await follow(run.runId);
+        await follow(run.runId, true);
       } catch (e) {
         fail(e);
       }
     },
     [run, follow, fail, toLogin],
   );
+
+  const unfinished = run !== null && !["completed", "failed", "cancelled"].includes(run.stage);
+  /** This account may drive and manage the run: its owner or an admin. */
+  const owns = run !== null && mayManageRun(run.startedById, user);
 
   return {
     run,
@@ -291,6 +300,13 @@ export function useResearchRun(canRun = true) {
     notFound,
     notice,
     running: status === "running",
+    /** Retry stages of this run (finished, own, not cancelled). */
+    canRetry: owns && run?.stage !== "cancelled",
+    /**
+     * Show Cancel: the run is unfinished on the server (also after this page lost contact) and
+     * this account owns it or is an admin.
+     */
+    canCancel: unfinished && owns,
     load,
     loadCurrent,
     start,
