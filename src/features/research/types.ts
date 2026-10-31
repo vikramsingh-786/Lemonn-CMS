@@ -218,6 +218,14 @@ export type DraftCheck = {
 
 export type DiscoveryMethod = "sitemap" | "tavily";
 
+/** A story discovery dropped as off-topic (no topic matched). Untrusted text: render as plain text. */
+export type OffTopicItem = {
+  url: string;
+  title: string;
+  publisher: string;
+  publishedAt: string | null;
+};
+
 /** A story found in Step 3 (discovery). Title and snippet are untrusted text: render as plain text. */
 export type DiscoveredItem = {
   url: string;
@@ -357,4 +365,7 @@ export type ConfiguredSource = {
   url: string;
   domain: string;
   enabled: boolean;
+  note?: string;
+  /** No news sitemap: discovery spends a paid Tavily search on it. */
+  paidSearch: boolean;
 };

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -7,6 +8,8 @@ type NewsSourcesProps = {
   sources: readonly ConfiguredSource[];
   onToggle: (id: string, enabled: boolean) => void;
   disabled?: boolean;
+  /** Admins get a link to change the defaults. */
+  canManage?: boolean;
 };
 
 function displayUrl(url: string) {
@@ -14,7 +17,7 @@ function displayUrl(url: string) {
   return (host.replace(/^www\./, "") + pathname).replace(/\/$/, "");
 }
 
-export function NewsSources({ sources, onToggle, disabled }: NewsSourcesProps) {
+export function NewsSources({ sources, onToggle, disabled, canManage }: NewsSourcesProps) {
   const enabled = sources.filter((s) => s.enabled).length;
 
   return (
@@ -49,7 +52,14 @@ export function NewsSources({ sources, onToggle, disabled }: NewsSourcesProps) {
               {String(index + 1).padStart(2, "0")}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium">{source.name}</p>
+              <p className="flex items-center gap-2 text-sm font-medium">
+                <span className="truncate">{source.name}</span>
+                {source.paidSearch && (
+                  <Badge variant="warning" className="shrink-0">
+                    Paid search
+                  </Badge>
+                )}
+              </p>
               <a
                 href={source.url}
                 target="_blank"
@@ -60,6 +70,7 @@ export function NewsSources({ sources, onToggle, disabled }: NewsSourcesProps) {
                 <ExternalLink aria-hidden className="size-3 shrink-0" />
                 <span className="sr-only">(opens in a new tab)</span>
               </a>
+              {source.note && <p className="mt-0.5 text-xs text-muted-foreground">{source.note}</p>}
             </div>
             <Badge
               variant={source.enabled ? "success" : "neutral"}
@@ -82,8 +93,16 @@ export function NewsSources({ sources, onToggle, disabled }: NewsSourcesProps) {
       </ol>
 
       <p className="border-t border-border px-5 py-3 text-xs text-muted-foreground sm:px-6">
-        The source list is fixed in this prototype (src/features/dashboard/data.ts). On/off switches
-        apply to this browser tab only.
+        Switches start from the defaults an admin chose and apply to runs started from this page;
+        they reset when the page reloads.{" "}
+        {canManage && (
+          <Link
+            href="/admin/sources"
+            className="font-medium text-foreground underline-offset-2 hover:underline"
+          >
+            Change the defaults
+          </Link>
+        )}
       </p>
     </section>
   );

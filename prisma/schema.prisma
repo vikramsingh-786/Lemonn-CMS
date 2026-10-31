@@ -17,6 +17,8 @@ model ResearchRun {
   stage         String
   data          Json
   evidence      Json      @default("{}")
+  /// Stories discovery dropped as off-topic (OffTopicItem[]), loaded only when an editor asks.
+  offTopic      Json      @default("[]")
   /// A step request holds the run until this time, so two requests never work on it at once.
   stepLockUntil DateTime?
   createdAt     DateTime  @default(now())
@@ -99,4 +101,12 @@ model LoginAttempt {
   createdAt DateTime @default(now())
 
   @@index([key, createdAt])
+}
+
+/// An admin's choice of whether a news source is on by default for new research runs.
+/// No row: the default in src/features/dashboard/data.ts applies.
+model SourceSetting {
+  sourceId  String   @id
+  enabled   Boolean
+  updatedAt DateTime @updatedAt
 }

@@ -13,10 +13,12 @@ export type Permission =
   /** See every account and change roles (admin page). */
   | "users:manage"
   /** Any run, whoever owns it: continue, stop, resume, retry and delete (admin page). */
-  | "runs:manage";
+  | "runs:manage"
+  /** Which news sources are on by default (admin page). */
+  | "sources:manage";
 
 const GRANTS: Record<Role, readonly Permission[]> = {
-  admin: ["research:run", "articles:edit", "users:manage", "runs:manage"],
+  admin: ["research:run", "articles:edit", "users:manage", "runs:manage", "sources:manage"],
   team: ["research:run", "articles:edit"],
   user: [],
 };

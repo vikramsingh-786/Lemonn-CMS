@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
-import type { ResearchRun } from "./types";
+import type { OffTopicItem, ResearchRun } from "./types";
 
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const FINISHED_STAGES = ["completed", "failed", "cancelled"];
@@ -140,6 +140,24 @@ export function saveEvidence(
     .$executeRaw`UPDATE "ResearchRun" SET "evidence" = "evidence" || ${JSON.stringify(passages)}::jsonb WHERE "id" = ${runId}::uuid`
     .then(() => undefined)
     .catch((e: unknown) => console.error("saveEvidence failed", runId, e));
+}
+
+/** Replaces the stories discovery dropped as off-topic (kept out of the polled run snapshot). */
+export async function saveOffTopic(runId: string, items: OffTopicItem[]): Promise<void> {
+  await db().researchRun.updateMany({
+    where: { id: runId },
+    data: { offTopic: items as unknown as Prisma.InputJsonValue },
+  });
+}
+
+/** Stories discovery dropped as off-topic; empty for older runs or an unknown id. */
+export async function loadOffTopic(runId: string): Promise<OffTopicItem[]> {
+  if (!isRunId(runId)) return [];
+  const row = await db().researchRun.findUnique({
+    where: { id: runId },
+    select: { offTopic: true },
+  });
+  return (row?.offTopic ?? []) as unknown as OffTopicItem[];
 }
 
 /** Evidence passages of a run; empty when it has none. */

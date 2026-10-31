@@ -17,8 +17,7 @@ work and saves it (`pipeline.ts`): discover → rank → verify 3 stories per st
 time; a cut-off step is repeated by the next one. This fits serverless limits (Vercel: 300 s per
 request). A run belongs to the account that started it: only that account's pages (or an admin's) drive, retry or cancel it; everyone else's pages watch it. Admins manage every run on `/admin/runs`: stop a running one, resume a stopped, cancelled or failed one where it stopped (`prepareResume`), or delete one with its articles. Closing the tab pauses a run; reopening it within 30 minutes resumes it. After 30 minutes without progress it is stopped for good (`getRun`), so an old run is never resumed on a stale window. Discovery reads
 publishers' Google News sitemaps (config in `src/features/research/sitemaps.ts`) or, for sources
-without one, searches Tavily. It keeps stories from the last 24 hours on 7 topics
-(`src/features/research/topics.ts`), at most 200 per source. Publisher fetches go through
+without one, searches Tavily. It keeps stories from the last 24 hours on 7 topics (`src/features/research/topics.ts`): a title keyword decides; the publisher's keyword tags or a search excerpt count only in a business section, and non-finance sections are dropped. At most 200 per source; the dropped stories (newest 100 per source) are saved in their own column and listed on the research page when opened. Admins choose which sources are on by default (`/admin/sources`, `SourceSetting`); the dashboard switches change one run. Publisher fetches go through
 `src/lib/safe-fetch.ts`. Step 4 (`rank.ts`, weights in `rank-config.ts`) then drops undated and
 non-article items, merges duplicate reports, scores candidates with rules (announcement > topic >
 source > coverage > recency, minus noise penalties), keeps each publisher's top 20 and, when
