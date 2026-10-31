@@ -93,7 +93,15 @@ export function ResearchDetails({ runId, user }: { runId: string; user: SessionU
           </aside>
           <div className="flex min-w-0 flex-col gap-5">
             <ResearchProgress run={run} />
-            <DiscoveredStories run={run} />
+            <DiscoveredStories
+              run={run}
+              busy={running}
+              onVerify={
+                canRetry && (run.stage === "completed" || run.stage === "failed")
+                  ? (id) => void retry("verify-story", id)
+                  : undefined
+              }
+            />
             <OffTopicStories run={run} />
             <VerificationReview
               run={run}

@@ -20,16 +20,32 @@ export const RANK_CONFIG = {
     /\bIPO\b|\bDRHP\b|\blisting\b/i,
     /\bacqui|\bstake\b|\bmerger\b|\bdeal\b/i,
   ],
-  /** Opening words that are never the company ("Buzzing Stocks: X", "Q2 results: X"). */
+  /**
+   * A regulator's rule change told in different words ("IBBI notifies new rules…" = "IBBI amends
+   * rules…"): same leading regulator, both about rules. Not approvals or bans: "SEBI approves X"
+   * and "SEBI approves Y" are different stories.
+   */
+  ruleChange: {
+    regulator: /^(?:sebi|rbi|ibbi|irdai|pfrda|cci|mca|nclt|amfi)$/,
+    pattern: /\brules?\b|\bnorms\b|\bguidelines\b|\bframework\b|\bcircular\b/i,
+  },
+  /**
+   * Opening words that are never the company ("Buzzing Stocks: X", "Q2 results: X"). Not
+   * "India"/"Indian": they start company names (Indian Oil, India Cements), and dropping them
+   * merged "Indian Oil Q2 profit" into "Oil-to-chemicals… Reliance profit" (1 Nov 2026).
+   */
   notCompanyWords: new Set(
-    "q1 q2 q3 q4 fy results result earnings profit loss revenue net reports posts shares share stock stocks buzzing live breaking update updates market markets sensex nifty india indian why how what".split(
+    "q1 q2 q3 q4 fy results result earnings profit loss revenue net reports posts shares share stock stocks buzzing live breaking update updates market markets sensex nifty why how what".split(
       " ",
     ),
   ),
 
   /*
    * Score weights follow the editorial priority, highest max first:
-   * announcement (6) > topic (5) > source (4) > coverage (3) > recency (2).
+   * announcement (6) > topic (5) = coverage (up to 5) > recency (2).
+   * Coverage replaced source credibility (4): every configured source is a major publisher, so
+   * it added the same 4 to every story, and how many publishers ran a story is the best sign of
+   * its importance (NTPC in 5 vs a small company in 1).
    * Higher signals usually win, but several lower ones together can beat a weak announcement.
    * Penalties are sized to cancel what they guard against, and any penalty also withholds the
    * announcement bonus (a preview or tip about results is not the announcement itself).
@@ -45,22 +61,9 @@ export const RANK_CONFIG = {
     [24, 0],
   ] as const,
 
+  /** +1 per publisher beyond the first, up to coverageMax (6 sources: 5 extra publishers). */
   coveragePerPublisher: 1,
-  coverageMax: 3,
-
-  /** Source credibility; also picks the lead report of a duplicate cluster. */
-  majorSourceIds: [
-    "moneycontrol",
-    "et-markets",
-    "bs-markets",
-    "cnbctv18",
-    "mint-markets",
-    "reuters-markets",
-    "bloomberg-markets",
-    "fe-markets",
-  ],
-  majorPoints: 4,
-  otherPoints: 2,
+  coverageMax: 5,
 
   /** Points for the best topic a candidate has (topic names from topics.ts). */
   topicPoints: {
@@ -77,7 +80,16 @@ export const RANK_CONFIG = {
   announcement: {
     points: 6,
     pattern:
-      /\bQ[1-4]\s*(?:FY\s?\d{2,4}\s*)?(?:results?|earnings|revenue|net (?:profit|loss)|profit|loss)\b|\b(?:March|June|September|December)[- ]quarter\b|\bnet (?:profit|loss)\b|\bprofit (?:rises?|jumps?|falls?|declines?|drops?|surges?|grows?|doubles)\b|\bdividends?\b|\bbonus\b|\bbuy-?backs?\b|\bstock split\b|\brights issue\b|\brecord date\b|\b(?:bags?|wins?|secures?)\b.{0,40}\border|\border worth\b|\bacquires?\b|\b(?:buys?|sells?|acquires?|picks up)\b.{0,40}\bstake\b|\bboard approves\b|\bappoints?\b|\bresigns?\b|\bU?DRHP\b|\bSEBI\b|\bRBI\b|\bcircular\b|\bpenalty\b|\brepo rate\b/i,
+      /\bQ[1-4]\s*(?:FY\s?\d{2,4}\s*)?(?:results?|earnings|revenue|net (?:profit|loss)|profit|loss)\b|\b(?:March|June|September|December)[- ]quarter\b|\bnet (?:profit|loss)\b|\bprofit (?:rises?|jumps?|falls?|declines?|drops?|surges?|grows?|doubles)\b|\bdividends?\b|\bbonus\b|\bbuy-?backs?\b|\bstock split\b|\brights issue\b|\brecord date\b|\b(?:bags?|wins?|secures?)\b.{0,40}\border|\border worth\b|\bacquires?\b|\b(?:buys?|sells?|acquires?|picks up)\b.{0,40}\bstake\b|\bboard approves\b|\bU?DRHP\b|\bcircular\b|\bimposes? (?:a )?penalty\b|\bpenalty on\b|\brepo rate\b|\bRBI data\b/i,
+    /**
+     * Also announcements, but only with these words: a company officer's appointment or exit
+     * ("Meghalaya minister… resigns" is not), and a regulator acting, not its chairman speaking
+     * (five SEBI speeches ranked in the top 21 on 1 Nov 2026).
+     */
+    leadership:
+      /\b(?:appoints?|appointed|names?|named|elevates?|ropes in)\b.{0,60}\b(?:CEO|MD|CFO|COO|CMD|CTO|chairman|chairperson|chief executive|managing director|whole-?time director|independent director|director)\b|\b(?:CEO|MD|CFO|COO|CMD|CTO|chairman|chairperson|managing director|director)\b.{0,40}\b(?:resigns?|quits?|steps? down)\b|\b(?:resigns?|quits?|steps? down)\b.{0,15}\bas\b.{0,25}\b(?:CEO|MD|CFO|COO|CMD|CTO|chairman|chairperson|managing director|director)\b/i,
+    regulatorAction:
+      /\b(?:SEBI|RBI|IRDAI|PFRDA|CCI|NCLT|IBBI)\b(?:'s)?\s+(?:\S+\s+){0,2}?(?:bars?|bans?|imposes?|issues?|approves?|nod|clears?|cancels?|revokes?|fines?|penali[sz]es?|orders?|notifies|amends?|tightens?|eases?|relaxes?|hikes?|cuts?|keeps?|holds?|allows?|extends?|directs?|slaps?|rejects?|sanctions?)\b/i,
   },
 
   /** Headline noise; each category counts once. `path` patterns test the URL path. */

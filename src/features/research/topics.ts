@@ -91,8 +91,14 @@ export const TOPICS: readonly { name: string; keywords: readonly string[] }[] = 
       "MD & CEO",
       "new CEO",
       "appoints",
-      "resigns as",
-      "steps down as",
+      // Company roles only: "resigns as" matched "minister… resigns as UDP loses…" (1 Nov 2026).
+      "resigns as CEO",
+      "resigns as MD",
+      "resigns as chairman",
+      "resigns as director",
+      "steps down as CEO",
+      "steps down as MD",
+      "steps down as chairman",
     ],
   },
   {

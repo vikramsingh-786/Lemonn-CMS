@@ -65,8 +65,18 @@ function sameCompany(a: string[], b: string[]): boolean {
 
 /** Same company and the same kind of event: one story told in different words. */
 function sameEvent(a: DatedItem, b: DatedItem): boolean {
+  const [nameA, nameB] = [companyName(a.title), companyName(b.title)];
+  const { regulator, pattern } = C.ruleChange;
+  if (
+    nameA[0] !== undefined &&
+    nameA[0] === nameB[0] &&
+    regulator.test(nameA[0]) &&
+    pattern.test(a.title) &&
+    pattern.test(b.title)
+  )
+    return true;
   return (
-    sameCompany(companyName(a.title), companyName(b.title)) &&
+    sameCompany(nameA, nameB) &&
     C.sameEvent.some((event) => event.test(a.title) && event.test(b.title))
   );
 }
@@ -76,11 +86,6 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   for (const w of a) if (b.has(w)) shared++;
   const union = a.size + b.size - shared;
   return union === 0 ? 0 : shared / union;
-}
-
-function sourcePoints(sourceId: string): number {
-  if ((C.majorSourceIds as readonly string[]).includes(sourceId)) return C.majorPoints;
-  return C.otherPoints;
 }
 
 function exclude(
@@ -129,12 +134,8 @@ export function clean(items: readonly DiscoveredItem[], window: ResearchRun["win
     });
   }
 
-  // Most credible first, then earliest: the first item of each cluster becomes its lead.
-  kept.sort(
-    (a, b) =>
-      sourcePoints(b.sourceId) - sourcePoints(a.sourceId) ||
-      a.publishedAt.localeCompare(b.publishedAt),
-  );
+  // Earliest first: the first report of each cluster becomes its lead.
+  kept.sort((a, b) => a.publishedAt.localeCompare(b.publishedAt));
   // ponytail: O(n²) headline comparison; fine for ≤1,400 items per run (7 sources × 200), use MinHash if runs grow.
   const clusters: Cluster[] = [];
   let duplicatesRemoved = 0;
@@ -184,9 +185,6 @@ function scoreCluster(cluster: Cluster, windowEnd: number): { score: number; rea
     `${publishers} publishers {p}`,
   );
 
-  const src = sourcePoints(lead.sourceId);
-  add(src, `source {p} (${src === C.majorPoints ? "major publisher" : "other"})`);
-
   const topics = clusterTopics(cluster);
   const best = Math.max(0, ...topics.map((t) => C.topicPoints[t] ?? 0));
   const bestTopic = topics.find((t) => (C.topicPoints[t] ?? 0) === best);
@@ -198,7 +196,11 @@ function scoreCluster(cluster: Cluster, windowEnd: number): { score: number; rea
   );
   // Tips, explainers, previews, questions and opinion that mention results/dividends etc. are
   // not the official announcement, so they earn no announcement bonus.
-  if (noiseHits.length === 0 && C.announcement.pattern.test(lead.title))
+  const { pattern, leadership, regulatorAction } = C.announcement;
+  if (
+    noiseHits.length === 0 &&
+    [pattern, leadership, regulatorAction].some((p) => p.test(lead.title))
+  )
     add(C.announcement.points, "announcement {p}");
   for (const noise of noiseHits) add(noise.points, `${noise.label} {p}`);
   return { score, reasons };

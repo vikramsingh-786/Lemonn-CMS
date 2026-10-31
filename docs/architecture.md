@@ -19,10 +19,9 @@ request). A run belongs to the account that started it: only that account's page
 publishers' Google News sitemaps (config in `src/features/research/sitemaps.ts`) or, for sources
 without one, searches Tavily. It keeps stories from the last 24 hours on 7 topics (`src/features/research/topics.ts`): a title keyword decides; the publisher's keyword tags or a search excerpt count only in a business section, and non-finance sections are dropped. At most 200 per source; the dropped stories (newest 100 per source) are saved in their own column and listed on the research page when opened. Admins choose which sources are on by default (`/admin/sources`, `SourceSetting`); the dashboard switches change one run. Publisher fetches go through
 `src/lib/safe-fetch.ts`. Step 4 (`rank.ts`, weights in `rank-config.ts`) then drops undated and
-non-article items, merges duplicate reports, scores candidates with rules (announcement > topic >
-source > coverage > recency, minus noise penalties), keeps each publisher's top 20 and, when
+non-article items, merges duplicate reports, scores candidates with rules (announcement > topic = coverage, up to 5 publishers > recency, minus noise penalties), keeps each publisher's top 20 and, when
 `GEMINI_API_KEY` is set, adds a Gemini relevance screen (`gemini.ts`), falling back to rules
-only. Step 5 (`verify.ts`) checks the top candidates' material claims against
+only. Step 5 (`verify.ts`) checks the top candidates' material claims (`verifyOrder`: verifiable first, at most half of the places for results stories; an editor can send any other story with "Verify this story") against
 the responsible organisation's official source (exchange filings, company or regulator site;
 domains resolved in `official-domains.ts`), reading pages/PDFs through `safe-fetch.ts` (`unpdf`
 for PDFs). Claim and story statuses are decided by application code (`gate()`), never by the
