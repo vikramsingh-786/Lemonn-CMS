@@ -69,6 +69,7 @@ async function geminiJson<T>(opts: {
     },
   });
 
+  let retriedInvalid = false;
   for (let attempt = 0; ; attempt++) {
     access.spendCall();
     let res: Response;
@@ -114,7 +115,14 @@ async function geminiJson<T>(opts: {
         // handled below
       }
       const parsed = opts.output.safeParse(json);
-      if (!parsed.success) throw new FetchError("bad_response", "Gemini returned invalid JSON");
+      if (!parsed.success) {
+        // One more try: a malformed answer is usually a one-off (1 of 40 calls on 1 Nov 2026).
+        if (!retriedInvalid) {
+          retriedInvalid = true;
+          continue;
+        }
+        throw new FetchError("bad_response", "Gemini returned invalid JSON");
+      }
       return parsed.data;
     }
 

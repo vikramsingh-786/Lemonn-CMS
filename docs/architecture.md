@@ -24,10 +24,16 @@ non-article items, merges duplicate reports, scores candidates with rules (annou
 only. Step 5 (`verify.ts`) checks the top candidates' material claims (`verifyOrder`: verifiable first, at most half of the places for results stories; an editor can send any other story with "Verify this story") against
 the responsible organisation's official source (exchange filings, company or regulator site;
 domains resolved in `official-domains.ts`), reading pages/PDFs through `safe-fetch.ts` (`unpdf`
-for PDFs). Claim and story statuses are decided by application code (`gate()`), never by the
-AI. Verified stories are queued for drafting by an evidence score (`draft-score.ts`, at most
+for PDFs). Exchange filings are found through Tavily (searched again in the filing's own wording
+when the first search finds no recent one); filings and pages whose URL dates them long before the
+story are not read. A website counts as an organisation's own only if its name matches (one-word
+names also need the model's hint; game/media domains never), or it is in the known list of
+regulators and market bodies. Figures match across crore/lakh/million/billion to the claim's
+rounding (a filing's 633.27 million is the news' ₹63.33 crore). The excerpt the matcher sees includes the document's unit statement and the table rows where a claim's amounts appear in any unit. Share-price moves are not checked.
+Claim and story statuses are decided by application code (`gate()`), never by the
+AI; "Core verified" means every high-importance claim is verified. Verified stories are queued for drafting by an evidence score (`draft-score.ts`, at most
 `DRAFT_TARGET`). While fewer than `DRAFT_MIN` (5) meet the evidence bar, verification continues
-down the ranking (up to 8 extra stories). Every other partially verified story is queued too:
+down the ranking (up to 8 extra stories), but only when at least a quarter of the stories checked had a claim officially confirmed. Every other partially verified story is queued too:
 its draft states verified claims as fact and attributes partially verified ones ("according to
 media reports"), lists them for the author, and is never marked ready for review. Step 6 (`draft.ts`) has Gemini write an original article from verified claims
 and their official evidence only, then runs deterministic checks (`draft-checks.ts`).

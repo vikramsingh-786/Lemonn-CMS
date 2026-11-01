@@ -28,6 +28,33 @@ const KNOWN: readonly [string, readonly string[]][] = [
   ["sci.gov.in", ["supreme court", "supreme court of india"]],
   ["nclt.gov.in", ["nclt", "national company law tribunal"]],
   ["nclat.nic.in", ["nclat", "national company law appellate tribunal"]],
+  ["ibbi.gov.in", ["ibbi", "insolvency and bankruptcy board of india"]],
+  ["sfio.gov.in", ["sfio", "serious fraud investigation office"]],
+  ["trai.gov.in", ["trai", "telecom regulatory authority of india"]],
+  ["gstcouncil.gov.in", ["gst council", "goods and services tax council"]],
+  ["incometaxindia.gov.in", ["cbdt", "central board of direct taxes", "income tax department"]],
+  ["cbic.gov.in", ["cbic", "central board of indirect taxes and customs"]],
+  ["dgft.gov.in", ["dgft", "directorate general of foreign trade"]],
+  ["dgca.gov.in", ["dgca", "directorate general of civil aviation"]],
+  ["pngrb.gov.in", ["pngrb", "petroleum and natural gas regulatory board"]],
+  [
+    "cdslindia.com",
+    [
+      "cdsl",
+      "central depository services india",
+      "central depository services india ltd",
+      "central depository services india limited",
+    ],
+  ],
+  [
+    "nsdl.co.in",
+    [
+      "nsdl",
+      "national securities depository",
+      "national securities depository limited",
+      "national securities depository ltd",
+    ],
+  ],
   [
     "federalreserve.gov",
     [
@@ -99,6 +126,9 @@ const NOT_OFFICIAL = new Set([
 ]);
 
 const LOOKALIKE = /-(?:news|update|updates|official|stock|stocks|ipo|fans|share|shares|price)\b/;
+
+/** Domain endings used by games, media and personal sites, never a listed company's own. */
+const HOBBY_SUFFIX = /\.(?:gg|tv|fm|me|ly|gl|xyz|club|games?|gaming|fun|live|blog)$/;
 
 /** Two-label public suffixes we see for Indian and common foreign organisations. */
 const MULTI_SUFFIXES = new Set([
@@ -189,13 +219,16 @@ export function chooseOfficialDomain(
   const hintDomain = hint ? registrableDomain(hint.replace(/^https?:\/\//, "").split("/")[0]!) : "";
   const rejected: string[] = [];
   let countrySite: DomainCheck | null = null;
+  // A one-word name ("Navi", "Vega") matches many sites (navi.gg is an esports team): its label
+  // counts only when the model's hint names the same domain (1 Nov 2026).
+  const ambiguous = nameTokens(authority).length <= 1;
   for (const host of searchHosts.slice(0, SEARCH_DEPTH)) {
     const domain = registrableDomain(host);
-    if (NOT_OFFICIAL.has(domain) || LOOKALIKE.test(label(domain))) {
+    if (NOT_OFFICIAL.has(domain) || LOOKALIKE.test(label(domain)) || HOBBY_SUFFIX.test(domain)) {
       rejected.push(domain);
       continue;
     }
-    if (names.has(label(domain))) {
+    if (names.has(label(domain)) && (!ambiguous || domain === hintDomain)) {
       const check: DomainCheck = {
         entity: authority,
         domain,
@@ -286,12 +319,15 @@ export function domainFromFiling(
   namesCompany: boolean,
 ): DomainCheck | null {
   if (!namesCompany) return null;
+  // Only the company's own name counts: a PhysicsWallah filing that names CDSL (its depository)
+  // near the top declared pw.live, which was taken as CDSL's site (1 Nov 2026).
+  const names = nameLabels(authority);
   for (const m of text.matchAll(
     /\b(?:website|web\s?site|web|url)\s*[:\-–]?\s*(?:https?:\/\/)?((?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+)/gi,
   )) {
     const domain = registrableDomain(m[1]!.replace(/[.,;]+$/, ""));
     if (!domain.includes(".") || NOT_FILER_SITE.has(domain) || NOT_OFFICIAL.has(domain)) continue;
-    if (LOOKALIKE.test(label(domain))) continue;
+    if (LOOKALIKE.test(label(domain)) || !names.has(label(domain))) continue;
     const check: DomainCheck = {
       entity: authority,
       domain,
