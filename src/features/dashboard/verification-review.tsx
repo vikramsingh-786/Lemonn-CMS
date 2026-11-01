@@ -118,7 +118,7 @@ export function VerificationReview({
           >
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="font-mono text-muted-foreground">#{c.rank}</span>
-              <CandidateStatusBadge status={c.status} />
+              <CandidateStatusBadge candidate={c} />
               {c.verificationScore !== null && (
                 <Badge variant="outline">Evidence score {c.verificationScore}</Badge>
               )}
@@ -161,7 +161,7 @@ function Details({ c }: { c: CandidateReport }) {
   return (
     <div className="space-y-5 text-xs text-foreground">
       <div className="flex flex-wrap items-center gap-2">
-        <CandidateStatusBadge status={c.status} />
+        <CandidateStatusBadge candidate={c} />
         <SourceLink href={c.url}>{c.publisher} · original report</SourceLink>
       </div>
       <p className="text-muted-foreground">{c.statusReason}</p>

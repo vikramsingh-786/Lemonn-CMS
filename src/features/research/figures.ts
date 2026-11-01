@@ -39,7 +39,7 @@ const UNIT_WORDS: Record<string, string> = {
   thousand: "thousands?|'?000s?",
 };
 
-function unitOf(s: string): string | null {
+export function unitOf(s: string): string | null {
   for (const [unit, words] of Object.entries(UNIT_WORDS)) {
     if (new RegExp(`(?<![\\p{L}])(?:${words})(?![\\p{L}])`, "iu").test(s)) return unit;
   }
@@ -51,11 +51,6 @@ function numberPattern(value: string): string {
   const [int, dec] = value.replace(/,/g, "").split(".");
   const body = [...int!].join(",?");
   return `(?<![\\d.,])${body}${dec ? `\\.${dec}` : ""}(?![\\d]|\\.\\d)`;
-}
-
-/** Number written with the fewest decimals needed (6.0 → "6", 13.77 → "13.77"). */
-function plain(n: number): string {
-  return Number(n.toFixed(4)).toString();
 }
 
 function has(text: string, pattern: string): boolean {
@@ -155,7 +150,7 @@ export function checkFigure(
       if (amountFound(raw, unit, text)) continue;
       return {
         found: false,
-        note: `"${figure}" not found in the same unit or an exact conversion`,
+        note: `"${figure}" not found in the same unit or a conversion (to the claim's rounding)`,
       };
     }
     if (!has(text, num)) return { found: false, note: `"${raw}" not found` };
@@ -165,6 +160,39 @@ export function checkFigure(
 
 /** Characters around an amount in which its comparison value must appear (same table row). */
 const ROW_CHARS = 250;
+
+/**
+ * An amount in every unit family, with how far a printed number may be from it and still be the
+ * same figure rounded: "₹63.33 crore" (±0.005 crore) is 633.3 million (±0.05), so a filing's
+ * "633.27" in "Rs. millions" matches (Quality Power, 31 Oct 2026). The claim's decimals set the
+ * tolerance; the number is never looser than that.
+ */
+export function amountConversions(
+  raw: string,
+  unit: string,
+): { unit: string; value: number; tolerance: number }[] {
+  const decimals = raw.split(".")[1]?.length ?? 0;
+  const inCrore = Number(raw.replace(/,/g, "")) * UNIT_IN_CRORE[unit]!;
+  const toleranceInCrore = (0.5 / 10 ** decimals) * UNIT_IN_CRORE[unit]!;
+  return Object.entries(UNIT_IN_CRORE).map(([other, factor]) => ({
+    unit: other,
+    value: inCrore / factor,
+    tolerance: toleranceInCrore / factor + 1e-9,
+  }));
+}
+
+/** Positions of numbers in `text` within `tolerance` of `value` (commas ignored). */
+export function numbersNear(text: string, value: number, tolerance: number): number[] {
+  const found: number[] = [];
+  for (const m of text.matchAll(/(?<![\d.,])\d[\d,]*(?:\.\d+)?(?!\d)/g)) {
+    if (Math.abs(Number(m[0].replace(/,/g, "")) - value) <= tolerance) found.push(m.index);
+  }
+  return found;
+}
+
+/** The text says its amounts are in this unit ("(Rs. in Crores)", "Amt in Rs. millions"). */
+const declaresUnit = (text: string, unit: string) =>
+  has(text, `(?:in|₹|rs\\.?|inr)\\s*(?:${UNIT_WORDS[unit]})(?![\\p{L}])`);
 
 /**
  * Reporters often state a change the filing does not print ("profit up 126%"). It counts only when
@@ -179,15 +207,19 @@ function derivedPercent(raw: string, siblings: readonly string[], text: string):
     const unit = unitOf(sibling);
     const amount = sibling.match(/\d[\d,]*(?:\.\d+)?/)?.[0];
     if (!unit || !amount) continue;
-    const inCrore = Number(amount.replace(/,/g, "")) * UNIT_IN_CRORE[unit]!;
-    for (const factor of Object.values(UNIT_IN_CRORE)) {
-      const value = Number(plain(inCrore / factor));
-      for (const m of text.matchAll(new RegExp(numberPattern(plain(value)), "giu"))) {
-        const row = text.slice(Math.max(0, m.index - ROW_CHARS), m.index + m[0].length + ROW_CHARS);
+    for (const v of amountConversions(amount, unit)) {
+      for (const pos of numbersNear(text, v.value, v.tolerance)) {
+        const here = Number(
+          text
+            .slice(pos)
+            .match(/\d[\d,]*(?:\.\d+)?/)![0]
+            .replace(/,/g, ""),
+        );
+        const row = text.slice(Math.max(0, pos - ROW_CHARS), pos + ROW_CHARS);
         for (const n of row.match(/\d[\d,]*(?:\.\d+)?/g) ?? []) {
           const base = Number(n.replace(/,/g, ""));
-          if (!(base > 0) || base === value) continue;
-          const change = Math.abs(value / base - 1) * 100;
+          if (!(base > 0) || base === here) continue;
+          const change = Math.abs(here / base - 1) * 100;
           if (Math.abs(change - p) <= tolerance) return true;
         }
       }
@@ -196,19 +228,20 @@ function derivedPercent(raw: string, siblings: readonly string[], text: string):
   return false;
 }
 
+/**
+ * The amount next to its unit word in any unit family ("1,377 crore", "Rs 13,770 mn"), or as a
+ * bare number in a text that declares that unit (filing tables state it once in the header);
+ * rounding to the claim's precision allowed either way.
+ */
 function amountFound(raw: string, unit: string, text: string): boolean {
-  const value = Number(raw.replace(/,/g, ""));
-  const inCrore = value * UNIT_IN_CRORE[unit]!;
-  for (const [other, factor] of Object.entries(UNIT_IN_CRORE)) {
-    const converted = plain(inCrore / factor);
-    // Same number written next to its unit ("1,377 crore", "Rs 13,770 mn").
-    if (has(text, `${numberPattern(converted)}\\s*(?:${UNIT_WORDS[other]})(?![\\p{L}])`))
-      return true;
+  for (const v of amountConversions(raw, unit)) {
+    const near = numbersNear(text, v.value, v.tolerance);
+    if (near.length === 0) continue;
+    const unitAfter = new RegExp(`^[\\d,.]+\\s*(?:${UNIT_WORDS[v.unit]})(?![\\p{L}])`, "iu");
+    if (near.some((pos) => unitAfter.test(text.slice(pos, pos + 40)))) return true;
+    if (declaresUnit(text, v.unit)) return true;
   }
-  // Bare number in a table whose header states the unit ("(Rs. in Crores)").
-  return (
-    has(text, numberPattern(raw)) && has(text, `(?:in|₹|rs\\.?|inr)\\s*(?:${UNIT_WORDS[unit]})`)
-  );
+  return false;
 }
 
 /** Deal stage words, strongest first. */

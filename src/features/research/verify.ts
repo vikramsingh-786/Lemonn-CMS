@@ -80,9 +80,15 @@ const MUTUAL_FUND = /mutual fund|\bnav\b|\bamc\b|\bscheme\b|\bsip\b|\bnfo\b|\bet
 const INDIAN = /₹|\brs\.?\s|\binr\b|crore|lakh|\bindia|\bsebi\b|\brbi\b|\bnse\b|\bbse\b/i;
 const US = /\$|\bus\b|\bu\.s\.|\bnasdaq\b|\bnyse\b/i;
 
-/** Pages that are never evidence: careers, help, search, login, contact, live quotes/market data. */
+/**
+ * Pages that are never evidence: careers, help, search, login, contact, live quotes/market data,
+ * exchange notices and quote pages (not a company's filing), course and exam pages.
+ */
 const NOT_EVIDENCE =
-  /\/(?:careers?|jobs?|help|faqs?|support|search|login|sign-?in|contact(?:-us)?|get-quotes?|market-data)(?:[/?.#]|$)/i;
+  /\/(?:careers?|jobs?|help|faqs?|support|search|login|sign-?in|contact(?:-us)?|get-quotes?|market-data|stock-share-price|mediacoverage|UploadDocs\/Notices|our-centre|exams?)(?:[/?.#]|$)/i;
+/** Branch / store / dealer locators and shops (locator.iocl.com, branches.muthootfinance.com). */
+const NOT_EVIDENCE_HOST =
+  /^(?:www\.)?(?:locator|branch(?:es)?|stores?|shop|dealers?|careers|jobs)\./i;
 /** Annual reports (huge, rarely the event) and exchange language mirrors (duplicates). */
 const SKIP =
   /annual[_-]?reports?|\/AR_\d|\/(?:hindi|bengali|telugu|marathi|gujarati|tamil|kannada|malayalam|odia|punjabi)\//i;
@@ -287,13 +293,20 @@ export async function verifyStep(run: ResearchRun, env: ServerEnv): Promise<bool
   let batch = pass.stopReason
     ? []
     : order.filter((c) => PENDING.has(c.status)).slice(0, CONCURRENCY);
-  // Fewer than DRAFT_MIN stories meet the evidence bar: verify the next ones in the same order.
-  if (
+  // Fewer than DRAFT_MIN stories meet the evidence bar: verify the next ones in the same order,
+  // but only if the stories checked so far show official evidence can be found today.
+  const short =
     batch.length === 0 &&
     !pass.stopReason &&
     pass.extra < MAX_EXTRA &&
-    run.candidates.filter(meetsEvidenceBar).length < DRAFT_MIN
-  ) {
+    run.candidates.filter(meetsEvidenceBar).length < DRAFT_MIN;
+  if (short && !extensionWorthwhile(run)) {
+    pass.extra = MAX_EXTRA;
+    warnOnce(
+      run,
+      "Few stories had a claim confirmed by an official source, so no further stories were verified (it would spend credits for little gain). Use “Verify this story” for a specific one.",
+    );
+  } else if (short) {
     batch = order
       .slice(limit)
       .filter((c) => c.status === "not_processed")
@@ -349,6 +362,20 @@ export async function verifyStep(run: ResearchRun, env: ServerEnv): Promise<bool
   return false;
 }
 
+/** At least this share of checked stories must have a claim confirmed officially to extend. */
+const EXTEND_MIN_YIELD = 0.25;
+
+/**
+ * Worth verifying more stories: enough of those checked had at least one claim confirmed by an
+ * official source. On 1 Nov 2026 1 of 12 did, and 8 more cost 25 searches for nothing.
+ */
+export function extensionWorthwhile(run: Pick<ResearchRun, "candidates">): boolean {
+  const checked = run.candidates.filter((c) => FINISHED.has(c.status));
+  if (checked.length === 0) return false;
+  const confirmed = checked.filter((c) => c.claims.some((a) => a.status === "verified"));
+  return confirmed.length / checked.length >= EXTEND_MIN_YIELD;
+}
+
 /** Counts and the draft queue, from the candidates' current statuses. */
 function summarise(run: ResearchRun) {
   const processed = run.candidates.filter((c) => FINISHED.has(c.status));
@@ -386,7 +413,13 @@ async function verifyCandidate(c: CandidateReport, ctx: Ctx): Promise<void> {
       ctx.fast,
     );
     c.entities = extracted.entities;
-    const claims: Claim[] = extracted.claims.map((cl, i) => ({ id: `${c.id}-k${i + 1}`, ...cl }));
+    // Share-price and market-cap moves are never in a company's or regulator's own document, so
+    // they are not checked and don't count against the story (1 Nov 2026: "shares ended 2.27% higher").
+    const claims: Claim[] = extracted.claims.map((cl, i) => ({
+      id: `${c.id}-k${i + 1}`,
+      ...cl,
+      materiality: cl.type === "market_movement" ? "low" : cl.materiality,
+    }));
     c.claims = claims.map((cl): ClaimAssessment => ({
       id: cl.id,
       claim: cl.text,
@@ -398,7 +431,12 @@ async function verifyCandidate(c: CandidateReport, ctx: Ctx): Promise<void> {
       stage: cl.stage,
       links: [],
       evidenceUrls: [],
-      explanation: cl.materiality === "low" ? "Low materiality: not checked." : "",
+      explanation:
+        cl.type === "market_movement"
+          ? "Share-price and market moves are not checked against official sources."
+          : cl.materiality === "low"
+            ? "Low materiality: not checked."
+            : "",
       gaps: "",
     }));
     const material = claims.filter((cl) => cl.materiality !== "low");
@@ -568,6 +606,16 @@ async function collectOfficial(
 
   if (isCompany && indian && FILING_TYPES.has(cl.type)) {
     await searchAndRead(c, cl, EXCHANGES, evidence, budgetLeft, ctx);
+    // The headline wording often misses the filing itself; ask again in the filing's own words.
+    const freshFiling = [...evidence.values()].some(
+      (e) =>
+        e.claimIds.has(cl.id) &&
+        e.record.sourceType === "official_filing" &&
+        e.record.retrieval === "page" &&
+        !e.record.stale,
+    );
+    if (!freshFiling)
+      await searchAndRead(c, cl, EXCHANGES, evidence, budgetLeft, ctx, filingQuery(cl));
   }
 
   let check = domains.get(cl.authority) ?? cachedOfficialDomain(cl.authority);
@@ -605,7 +653,17 @@ async function collectOfficial(
   }
 }
 
-/** One restricted search + reading the best results within the claim's attempt/page budget. */
+/** How a company's exchange filing for this kind of claim is titled. */
+function filingQuery(cl: Claim): string {
+  return cl.type === "earnings"
+    ? `${cl.authority} outcome of board meeting financial results quarter ended`
+    : `${cl.authority} intimation disclosure under regulation 30`;
+}
+
+/**
+ * One restricted search + reading the best results within the claim's attempt/page budget.
+ * `query`: a different wording than "<authority> <headline>" (searched once per story too).
+ */
 async function searchAndRead(
   c: CandidateReport,
   cl: Claim,
@@ -613,9 +671,10 @@ async function searchAndRead(
   evidence: Map<string, Evidence>,
   left: { attempts: number; pages: number; snippets: number },
   ctx: Ctx,
+  query = `${cl.authority} ${c.headline}`,
 ) {
-  // One search per story, organisation and site set; later claims reuse its results.
-  const key = `${c.id}|${cl.authority.toLowerCase()}|${domains.join(",")}`;
+  // One search per story, organisation, site set and wording; later claims reuse its results.
+  const key = `${c.id}|${cl.authority.toLowerCase()}|${domains.join(",")}|${query === `${cl.authority} ${c.headline}` ? "" : query}`;
   const done = ctx.searched.get(key);
   if (done) {
     for (const url of done) evidence.get(url)?.claimIds.add(cl.id);
@@ -623,13 +682,16 @@ async function searchAndRead(
   }
   const found: string[] = [];
   ctx.searched.set(key, found);
+  const isCompany = cl.authorityKind === "company";
+  const storyTime = c.publishedAt ? Date.parse(c.publishedAt) : Date.now();
+  const staleMs = cl.type === "earnings" ? EARNINGS_STALE_MS : STALE_MS;
   let results;
   try {
     // A dated event: only recent pages (older filings and releases are last year's results).
     const recentOnly = TIME_BOUND.has(cl.type);
     results = await searchOfficial(
       {
-        query: `${cl.authority} ${c.headline}`,
+        query,
         domains,
         maxResults: 5,
         ...(recentOnly && { timeRange: "month" as const }),
@@ -650,16 +712,26 @@ async function searchAndRead(
           u.protocol === "https:" &&
           domains.some((d) => isWithinDomain(u.hostname, d)) &&
           !NOT_EVIDENCE.test(u.pathname) &&
+          !NOT_EVIDENCE_HOST.test(u.hostname) &&
           !SKIP.test(u.pathname)
         );
       } catch {
         return false;
       }
     })
-    .sort((a, b) => Number(PREFERRED.test(b.url)) - Number(PREFERRED.test(a.url)));
+    // A page whose own URL dates it far before the story (NSE file names, /oct-2013/ paths) is
+    // last year's document: not read, so it doesn't use up the claim's page allowance.
+    .filter((r) => {
+      const urlDate = dateHint(r.url, null);
+      return !(TIME_BOUND.has(cl.type) && urlDate && urlDate.getTime() < storyTime - 2 * staleMs);
+    })
+    // Newest by URL date first (an exchange search mixes years), then preferred paths.
+    .sort(
+      (a, b) =>
+        (dateHint(b.url, null)?.getTime() ?? 0) - (dateHint(a.url, null)?.getTime() ?? 0) ||
+        Number(PREFERRED.test(b.url)) - Number(PREFERRED.test(a.url)),
+    );
 
-  const isCompany = cl.authorityKind === "company";
-  const storyTime = c.publishedAt ? Date.parse(c.publishedAt) : Date.now();
   for (const r of usable) {
     if (left.pages <= 0 || left.attempts <= 0) break;
     const existing = evidence.get(r.url);
@@ -682,7 +754,6 @@ async function searchAndRead(
     }
     if (!page && left.snippets <= 0) continue;
     const dated = dateHint(r.url, r.publishedAt, page ? text : "");
-    const staleMs = cl.type === "earnings" ? EARNINGS_STALE_MS : STALE_MS;
     evidence.set(r.url, {
       text: page ? text : r.snippet,
       claimIds: new Set([cl.id]),
@@ -899,7 +970,11 @@ export function rollUp(c: CandidateReport) {
     c.statusReason = `All ${statuses.length} material claim(s) confirmed by official sources, figures included.`;
   } else if (statuses.some((s) => s === "verified" || s === "partially_verified")) {
     c.status = "partially_verified";
-    c.statusReason = `${verified} of ${statuses.length} material claim(s) fully verified; the rest have only partial support.`;
+    const high = c.claims.filter((a) => a.materiality === "high");
+    c.statusReason =
+      high.length > 0 && high.every((a) => a.status === "verified")
+        ? `Core verified: all ${high.length} high-importance claim(s) confirmed by official sources, figures included; ${statuses.length - verified} supporting claim(s) only partly supported.`
+        : `${verified} of ${statuses.length} material claim(s) fully verified; the rest have only partial support.`;
   } else {
     c.status = "unverified";
     c.statusReason = `No material claim could be established from retrieved evidence. ${NOT_FALSE}`;

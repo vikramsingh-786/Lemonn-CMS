@@ -1,6 +1,7 @@
 import "server-only";
 import { extractText } from "unpdf";
 import type { FetchedDoc } from "@/lib/safe-fetch";
+import { amountConversions, numbersNear, unitOf } from "./figures";
 import { decodeEntities } from "./sitemaps";
 
 const DROP_BLOCKS = /<(script|style|noscript|nav|header|footer|aside|svg|form)\b[\s\S]*?<\/\1>/gi;
@@ -96,11 +97,32 @@ function numberPattern(digits: string, decimals = ""): string {
   return `(?<![\\d.,])${body}${decimals ? `\\.${decimals}` : ""}(?![\\d])`;
 }
 
-type Term = { regex: RegExp; weight: number; label: string };
+/** A distinctive term and where it occurs (`find` for amounts matched by value, not digits). */
+type Term = { regex?: RegExp; find?: (text: string) => number[]; weight: number; label: string };
 
-/** Distinctive terms of a claim: numbers (≥3 digits weigh 3, others 1) and non-generic words. */
+/**
+ * Distinctive terms of a claim: numbers (≥3 digits weigh 3, others 1), each amount also in the
+ * other units a filing may use ("₹63.33 crore" → "633" for a table in Rs. millions), and
+ * non-generic words.
+ */
 function claimTerms(claim: string, figures: readonly string[]): Term[] {
   const terms = new Map<string, Term>();
+  for (const figure of figures) {
+    const unit = unitOf(figure);
+    const amount = figure.match(/\d[\d,]*(?:\.\d+)?/)?.[0];
+    if (!unit || !amount) continue;
+    for (const v of amountConversions(amount, unit)) {
+      const label = `${v.unit}:${v.value}`;
+      if (v.value < 1 || v.value >= 1e9 || terms.has(label)) continue;
+      // By value to the claim's rounding (₹294 crore = 2,940 million, printed 2,939.6). An amount
+      // outweighs words: on 1 Nov 2026 a cover letter's words beat Quality Power's profit row.
+      terms.set(label, {
+        label,
+        weight: 5,
+        find: (text) => numbersNear(text, v.value, v.tolerance),
+      });
+    }
+  }
   for (const m of `${claim} ${figures.join(" ")}`.matchAll(/\d[\d,]*(?:\.(\d+))?/g)) {
     const digits = m[0].split(".")[0]!.replace(/,/g, "");
     const decimals = m[1] ?? "";
@@ -125,6 +147,9 @@ function claimTerms(claim: string, figures: readonly string[]): Term[] {
 }
 
 const COVER = 300;
+/** "(Amt in Rs. millions)", "(₹ in crore)", "Rs. in Lakhs", "(in INR million)". */
+const UNIT_STATEMENT =
+  /\(?\s*(?:amt\.?|amount|figures|all amounts)?\s*(?:are\s+)?in\s+(?:rs\.?|₹|inr)?\s*(?:crores?|lakhs?|lacs?|millions?|mn|billions?|thousands?)\b\.?\s*\)?|\(\s*(?:rs\.?|₹|inr)\s*(?:in\s+)?(?:crores?|lakhs?|lacs?|millions?|mn|billions?|thousands?)\s*\)/gi;
 const HALF_WINDOW = 450;
 
 /**
@@ -152,17 +177,24 @@ export function relevantExcerpt(
     }
   }
   chosen.sort((a, b) => a.start - b.start);
-  return [text.slice(0, COVER), ...chosen.map((c) => text.slice(c.start, c.end))].join(" … ");
+  // Tables state their unit once ("(Amt in Rs. millions)"); without it the model can't read
+  // 633.27 as ₹63.33 crore (Quality Power, 1 Nov 2026), so every unit statement goes first.
+  const units = [...new Set([...text.matchAll(UNIT_STATEMENT)].map((m) => m[0].trim()))];
+  const head = [
+    text.slice(0, COVER),
+    ...(units.length > 0 ? [`[Units stated: ${units.slice(0, 3).join("; ")}]`] : []),
+  ];
+  return [...head, ...chosen.map((c) => text.slice(c.start, c.end))].join(" … ");
 }
 
 /** Windows around each hit of `terms`, best (most distinct term weight) first. */
 function rankedWindows(text: string, terms: readonly Term[]) {
   const hits: { pos: number; term: Term }[] = [];
   for (const term of terms) {
-    for (const m of text.matchAll(term.regex)) {
-      hits.push({ pos: m.index, term });
-      if (hits.length > 3000) break;
-    }
+    const positions = term.find
+      ? term.find(text)
+      : [...text.matchAll(term.regex!)].map((m) => m.index);
+    for (const pos of positions.slice(0, 3000)) hits.push({ pos, term });
   }
   hits.sort((a, b) => a.pos - b.pos);
 
@@ -205,6 +237,17 @@ export function nameTokens(name: string): string[] {
         "plc",
         "of",
         "and",
+        // Foreign legal forms ("Vega SAS" is one name word, as ambiguous as "Vega").
+        "sas",
+        "sa",
+        "ag",
+        "gmbh",
+        "bv",
+        "nv",
+        "llc",
+        "llp",
+        "pjsc",
+        "spa",
       ].includes(t),
   );
 }

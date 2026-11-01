@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import type { CandidateStatus, ClaimStatus } from "@/features/research/types";
+import type { CandidateReport, CandidateStatus, ClaimStatus } from "@/features/research/types";
 
 type Variant = "success" | "warning" | "neutral" | "outline";
 
@@ -24,8 +24,27 @@ const CLAIM: Record<ClaimStatus, [string, Variant]> = {
   verification_failed: ["Verification failed", "neutral"],
 };
 
-export function CandidateStatusBadge({ status }: { status: CandidateStatus }) {
-  const [label, variant] = CANDIDATE[status];
+/**
+ * Partially verified, but every high-importance claim is verified (the story's core news is
+ * confirmed by the official source; only supporting details are not). Same rule as the draft
+ * queue's evidence bar.
+ */
+export function coreVerified(c: Pick<CandidateReport, "status" | "claims">): boolean {
+  const high = c.claims.filter((a) => a.materiality === "high");
+  return (
+    c.status === "partially_verified" &&
+    high.length > 0 &&
+    high.every((a) => a.status === "verified")
+  );
+}
+
+export function CandidateStatusBadge({
+  candidate,
+}: {
+  candidate: Pick<CandidateReport, "status" | "claims">;
+}) {
+  if (coreVerified(candidate)) return <Badge variant="success">Core verified</Badge>;
+  const [label, variant] = CANDIDATE[candidate.status];
   return <Badge variant={variant}>{label}</Badge>;
 }
 
