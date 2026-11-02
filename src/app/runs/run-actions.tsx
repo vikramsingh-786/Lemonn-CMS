@@ -32,7 +32,7 @@ export function RunActions({
     const response = await fetch(`/api/research/${runId}${path}`, { method }).catch(() => null);
     setBusy(false);
     if (response?.status === 401) {
-      router.push(`/login?expired=1&next=${encodeURIComponent("/admin/runs")}`);
+      router.push(`/login?expired=1&next=${encodeURIComponent("/runs")}`);
       return false;
     }
     if (!response?.ok) {

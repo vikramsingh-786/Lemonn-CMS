@@ -60,13 +60,13 @@ async function Account() {
                 All accounts
               </Link>
             )}
-            {can(user.role, "runs:manage") && (
+            {can(user.role, "research:run") && (
               <Link
-                href="/admin/runs"
+                href="/runs"
                 className="pill-raised inline-flex h-9 items-center gap-2 rounded-full bg-muted px-4 text-xs font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <ListChecks aria-hidden className="size-4" />
-                All research runs
+                {can(user.role, "runs:manage") ? "All research runs" : "My research runs"}
               </Link>
             )}
             <form action={logout}>
