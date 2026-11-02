@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { BrandMark } from "@/components/layout/brand";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { getCurrentUser, safeNextPath } from "@/lib/auth";
 
 /** Layout shared by /login and /signup. */
@@ -13,7 +14,11 @@ export function AuthCard({
   children: React.ReactNode;
 }) {
   return (
-    <main className="flex min-h-dvh items-center justify-center px-4 py-10">
+    <main className="relative flex min-h-dvh items-center justify-center px-4 py-16">
+      {/* Same toggle as the app header (these pages have no header). */}
+      <div className="absolute top-3 right-3 sm:top-5 sm:right-5">
+        <ThemeToggle />
+      </div>
       <div className="surface-raised w-full max-w-sm rounded-lg border border-border bg-card p-6 sm:p-8">
         <div className="flex items-center gap-3">
           <BrandMark />
