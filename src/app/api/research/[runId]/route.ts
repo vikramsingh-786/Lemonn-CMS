@@ -1,5 +1,6 @@
 import { connection } from "next/server";
 import { requireApi } from "@/lib/auth";
+import { ownerBlock } from "@/features/research/pipeline";
 import { deleteRun, getRun, isActive } from "@/features/research/run-store";
 import { db } from "@/lib/db";
 import type { ApiErrorBody } from "@/features/research/types";
@@ -20,14 +21,24 @@ export async function GET(_request: Request, ctx: RouteContext<"/api/research/[r
   return Response.json(run, { headers: { "Cache-Control": "no-store" } });
 }
 
-/** Deletes a run and its articles (admins only). A run that is going must be stopped first. */
+/**
+ * Deletes a run and its articles: its owner or an admin. A run that is going must be stopped
+ * first.
+ */
 export async function DELETE(_request: Request, ctx: RouteContext<"/api/research/[runId]">) {
-  const auth = await requireApi("runs:manage");
+  const auth = await requireApi("research:run");
   if (auth.denied) return auth.denied;
   const { runId } = await ctx.params;
   // getRun first: it stops the run if abandoned, so only a run really going is refused.
+  const run = await getRun(runId);
+  const denied = run && ownerBlock(run, auth.user, "delete");
+  if (denied)
+    return Response.json(
+      { error: { code: "forbidden", message: denied, retryable: false } } satisfies ApiErrorBody,
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
   const row =
-    (await getRun(runId)) &&
+    run &&
     (await db().researchRun.findUnique({
       where: { id: runId },
       select: { stage: true, updatedAt: true, stepLockUntil: true },

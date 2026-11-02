@@ -5,7 +5,7 @@ import { draftStep } from "./draft";
 import { rankRun } from "./rank";
 import { stopRun } from "./run-store";
 import type { ResearchRun } from "./types";
-import { mayManageRun, type SessionUser } from "@/lib/roles";
+import { can, mayManageRun, type SessionUser } from "@/lib/roles";
 import { beginVerifyPass, queueStory, verifyStep } from "./verify";
 
 /**
@@ -138,8 +138,12 @@ export function cancelRun(run: ResearchRun, by?: string): string | null {
 export function ownerBlock(
   run: ResearchRun,
   user: SessionUser,
-  action: "continue" | "retry" | "resume" | "cancel",
+  action: "continue" | "retry" | "resume" | "cancel" | "delete",
 ): string | null {
+  // A run from before accounts has no owner: anyone on the team may continue it, but only an
+  // admin may delete it.
+  if (action === "delete" && !run.startedById && !can(user.role, "runs:manage"))
+    return "Only an admin can delete a research run from before accounts.";
   if (mayManageRun(run.startedById, user)) return null;
   return `Only ${run.startedBy ?? "the person who started it"} can ${action} this research run.`;
 }
