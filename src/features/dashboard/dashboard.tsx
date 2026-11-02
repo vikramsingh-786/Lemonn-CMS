@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
@@ -32,7 +32,13 @@ export function Dashboard({
   const canEdit = can(user.role, "articles:edit");
   const [sources, setSources] = useState<ConfiguredSource[]>(defaultSources);
   const [articles, setArticles] = useState<Record<string, ArticleSummary>>({});
-  const [opening, setOpening] = useState<string | null>(null);
+  /** The draft whose article is being created, then the one whose editor is loading. */
+  const [creating, setCreating] = useState<string | null>(null);
+  const [target, setTarget] = useState<string | null>(null);
+  // Pending only until the editor has loaded; coming back to this page (its state is kept) never
+  // shows a stale "Opening…".
+  const [navigating, startNavigation] = useTransition();
+  const opening = creating ?? (navigating ? target : null);
   const [editError, setEditError] = useState<string | null>(null);
   const router = useRouter();
   const {
@@ -71,9 +77,13 @@ export function Dashboard({
   /** Opens the editor; the first time, the server creates the article from the AI draft. */
   async function editDraft(draft: ResearchDraft) {
     if (!runId) return;
+    const open = (articleId: string) => {
+      setTarget(draft.id);
+      startNavigation(() => router.push(`/articles/${articleId}`));
+    };
     const existing = articles[draft.candidateId];
-    if (existing) return router.push(`/articles/${existing.id}`);
-    setOpening(draft.id);
+    if (existing) return open(existing.id);
+    setCreating(draft.id);
     setEditError(null);
     const response = await fetch("/api/articles", {
       method: "POST",
@@ -87,11 +97,9 @@ export function Dashboard({
       return;
     }
     const data = response?.ok ? ((await response.json()) as { id: string }) : null;
-    if (data) router.push(`/articles/${data.id}`);
-    else {
-      setOpening(null);
-      setEditError("Could not open the editor for this draft. Try again.");
-    }
+    setCreating(null);
+    if (!data) return setEditError("Could not open the editor for this draft. Try again.");
+    open(data.id);
   }
 
   useEffect(() => {
