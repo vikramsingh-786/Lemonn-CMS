@@ -12,10 +12,12 @@ import { cn } from "@/lib/utils";
 import { formatIst } from "./format";
 import { SourceLink } from "./status";
 
-type Filter = "all" | ArticleStatus;
+/** "ai": an AI draft nobody has opened yet (no article); the rest are the article's status. */
+type Filter = "all" | "ai" | ArticleStatus;
 
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
+  { value: "ai", label: "AI drafts" },
   { value: "draft", label: "In editing" },
   { value: "ready", label: "Ready to publish" },
   { value: "rejected", label: "Rejected" },
@@ -67,8 +69,9 @@ export function ArticleReview({
 }: ArticleReviewProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [openId, setOpenId] = useState<string | null>(null);
-  // A draft without an article is still "in editing"; an editor moves articles to ready/rejected.
-  const statusOf = (d: ResearchDraft): ArticleStatus => articles[d.candidateId]?.status ?? "draft";
+  // Only an opened draft (an article) is "in editing", as on /articles; the others are AI drafts.
+  const statusOf = (d: ResearchDraft): Exclude<Filter, "all"> =>
+    articles[d.candidateId]?.status ?? "ai";
   const countFor = (value: Filter) =>
     value === "all" ? drafts.length : drafts.filter((d) => statusOf(d) === value).length;
   const visible = filter === "all" ? drafts : drafts.filter((d) => statusOf(d) === filter);
