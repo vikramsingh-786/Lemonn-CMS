@@ -2,8 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { getCurrentUser } from "@/lib/auth";
+import { endOtherSessions, getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { hashPassword } from "@/lib/password";
+import { PASSWORD_MIN } from "@/lib/password-rules";
 import { ROLES, can, toRole } from "@/lib/roles";
 
 export type RoleChangeResult = { error: string | null };
@@ -47,5 +49,32 @@ export async function setRole(userId: string, role: string): Promise<RoleChangeR
   });
   if (error) return { error };
   revalidatePath("/admin/users");
+  return { error: null };
+}
+
+const passwordSchema = z.object({
+  userId: z.uuid(),
+  password: z.string().min(PASSWORD_MIN, `Use at least ${PASSWORD_MIN} characters.`).max(200),
+});
+
+/**
+ * Sets another account's password (for someone locked out; the app can't send email) and signs
+ * them out everywhere. Admins only; their own password is changed on /account.
+ */
+export async function setPassword(userId: string, password: string): Promise<RoleChangeResult> {
+  const me = await getCurrentUser();
+  if (!me) return { error: "Your session has ended. Sign in again." };
+  if (!can(me.role, "users:manage")) return { error: "Only admins can set passwords." };
+  const parsed = passwordSchema.safeParse({ userId, password });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the password." };
+  if (parsed.data.userId === me.id)
+    return { error: "Change your own password on your Account page." };
+  const passwordHash = await hashPassword(parsed.data.password);
+  const { count } = await db().user.updateMany({
+    where: { id: parsed.data.userId },
+    data: { passwordHash },
+  });
+  if (!count) return { error: "That account no longer exists." };
+  await endOtherSessions(parsed.data.userId, null);
   return { error: null };
 }

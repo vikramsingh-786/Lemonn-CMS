@@ -56,6 +56,9 @@ export function LoginForm() {
           Create an account
         </Link>
       </p>
+      <p className="mt-2 text-center text-xs text-muted-foreground">
+        Forgot your password? Ask an admin to set a new one.
+      </p>
     </>
   );
 }
