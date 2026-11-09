@@ -10,7 +10,7 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/research/[
   const auth = await requireApi("research:run");
   if (auth.denied) return auth.denied;
   const { runId } = await ctx.params;
-  const run = await getRun(runId);
+  const run = await getRun(runId, { stopAbandoned: true });
   const denied = run && ownerBlock(run, auth.user, "cancel");
   if (denied) {
     const body: ApiErrorBody = { error: { code: "forbidden", message: denied, retryable: false } };

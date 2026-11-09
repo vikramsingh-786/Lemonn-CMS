@@ -25,6 +25,10 @@ const MONTH_RE = MONTHS.map((m) => `${m}|${m.slice(0, 3)}${m === "september" ? "
 
 /** Unit families and their value in crore (Indian reports mix crore, lakh, million and billion). */
 const UNIT_IN_CRORE: Record<string, number> = {
+  // Compound units first: "₹1.2 lakh crore" is 1,20,000 crore, not 1.2 crore.
+  "lakh crore": 100_000,
+  "thousand crore": 1_000,
+  trillion: 100_000,
   crore: 1,
   lakh: 0.01,
   million: 0.1,
@@ -32,12 +36,47 @@ const UNIT_IN_CRORE: Record<string, number> = {
   thousand: 0.0001,
 };
 const UNIT_WORDS: Record<string, string> = {
+  "lakh crore": "(?:lakhs?|lacs?)\\s*(?:crores?|cr\\.?)",
+  "thousand crore": "thousand\\s*(?:crores?|cr\\.?)",
+  trillion: "trillions?|tn",
   crore: "crores?|cr\\.?",
   lakh: "lakhs?|lacs?",
   million: "millions?|mn|mln",
   billion: "billions?|bn",
   thousand: "thousands?|'?000s?",
 };
+/** A simple unit followed by crore is part of a compound unit ("1.2 lakh crore" is not 1.2 lakh). */
+const NOT_COMPOUND = "(?!\\s*(?:crores?|cr\\.?)(?![\\p{L}]))";
+
+export type Currency = "INR" | "USD" | "EUR" | "GBP" | "JPY";
+const CURRENCIES: [Currency, RegExp][] = [
+  ["USD", /us\$|\$|\busd\b|\bdollars?\b/i],
+  ["INR", /₹|\brs\b\.?|\binr\b|\brupees?\b/i],
+  ["EUR", /€|\beur\b|\beuros?\b/i],
+  ["GBP", /£|\bgbp\b|\bpounds?\b/i],
+  ["JPY", /¥|\bjpy\b|\byen\b/i],
+];
+
+/** The currency a figure or a snippet of text names, if any. */
+export function currencyOf(s: string): Currency | null {
+  return CURRENCIES.find(([, re]) => re.test(s))?.[0] ?? null;
+}
+
+/**
+ * Currency written right next to the number at `pos` (just before it, or in the two words after
+ * it: "Rs 100 million", "100 million dollars"); null when none is written there.
+ */
+function currencyAt(text: string, pos: number): Currency | null {
+  const before =
+    text
+      .slice(Math.max(0, pos - 12), pos)
+      .match(/(?:us\$|[$₹€£¥]|\b(?:rs|inr|usd|eur|gbp)\b\.?)\s*$/i)?.[0] ?? "";
+  const after = (text.slice(pos).match(/^[\d,.]+\s*(?:[\p{L}]+\.?\s*){0,2}/u)?.[0] ?? "").replace(
+    /^[\d,.]+/,
+    "",
+  );
+  return currencyOf(before) ?? currencyOf(after);
+}
 
 export function unitOf(s: string): string | null {
   for (const [unit, words] of Object.entries(UNIT_WORDS)) {
@@ -132,6 +171,7 @@ export function checkFigure(
   const isPoints = /\b(?:pp|percentage points?|bps|basis points?)\b/i.test(figure);
   const isPercent = !isPoints && /%|per\s?cent/i.test(figure);
   const unit = unitOf(figure);
+  const currency = isPercent || isPoints ? null : currencyOf(figure);
 
   for (const [i, raw] of numbers.entries()) {
     const num = numberPattern(raw);
@@ -147,13 +187,20 @@ export function checkFigure(
       continue;
     }
     if (unit && last) {
-      if (amountFound(raw, unit, text)) continue;
+      if (amountFound(raw, unit, text, currency)) continue;
       return {
         found: false,
-        note: `"${figure}" not found in the same unit or a conversion (to the claim's rounding)`,
+        note: `"${figure}" not found in the same ${currency ? "currency and " : ""}unit or a conversion (to the claim's rounding)`,
       };
     }
-    if (!has(text, num)) return { found: false, note: `"${raw}" not found` };
+    const occurrences = [...text.matchAll(new RegExp(num, "giu"))];
+    if (occurrences.length === 0) return { found: false, note: `"${raw}" not found` };
+    if (
+      currency &&
+      last &&
+      !occurrences.some((m) => sameCurrency(currency, currencyAt(text, m.index)))
+    )
+      return { found: false, note: `"${figure}" not found in ${currency}` };
   }
   return { found: true, note: "" };
 }
@@ -190,9 +237,35 @@ export function numbersNear(text: string, value: number, tolerance: number): num
   return found;
 }
 
-/** The text says its amounts are in this unit ("(Rs. in Crores)", "Amt in Rs. millions"). */
-const declaresUnit = (text: string, unit: string) =>
-  has(text, `(?:in|₹|rs\\.?|inr)\\s*(?:${UNIT_WORDS[unit]})(?![\\p{L}])`);
+/** A claim's currency and a currency written in the text agree (either may be unstated). */
+const sameCurrency = (claim: Currency | null, found: Currency | null) =>
+  !claim || !found || claim === found;
+
+/**
+ * The currencies of the text's unit statements for `unit` ("(Rs. in Crores)" → INR,
+ * "Amt in USD millions" → USD, "(in crore)" → null). Empty when the text states no such unit.
+ */
+function declaredUnitCurrencies(text: string, unit: string): (Currency | null)[] {
+  const re = new RegExp(
+    `(?:\\bin|₹|\\brs\\.?|\\binr|\\busd|us\\$|\\$)\\s*(?:(?:rs\\.?|₹|inr|usd|us\\$|\\$)\\s*)?(?:${UNIT_WORDS[unit]})(?![\\p{L}])${unit === "lakh" || unit === "thousand" ? NOT_COMPOUND : ""}`,
+    "giu",
+  );
+  return [...text.matchAll(re)].map((m) =>
+    currencyOf(text.slice(Math.max(0, m.index - 15), m.index + m[0].length)),
+  );
+}
+
+/**
+ * A bare number that sits in a table row: the next thing after it is another number, a bracket or
+ * the end, or the thing before it is a number. "Employees: 1,377 persons" is not a table figure.
+ */
+function inTableRow(text: string, pos: number): boolean {
+  const len = text.slice(pos).match(/^\d[\d,]*(?:\.\d+)?/)?.[0].length ?? 0;
+  const next = text.slice(pos + len).match(/^\s*(\S)/)?.[1];
+  if (next === undefined || /[\d(\-–|]/.test(next)) return true;
+  const prev = text.slice(0, pos).match(/(\S+)\s*$/)?.[1] ?? "";
+  return /[\d)]$/.test(prev);
+}
 
 /**
  * Reporters often state a change the filing does not print ("profit up 126%"). It counts only when
@@ -233,37 +306,116 @@ function derivedPercent(raw: string, siblings: readonly string[], text: string):
  * bare number in a text that declares that unit (filing tables state it once in the header);
  * rounding to the claim's precision allowed either way.
  */
-function amountFound(raw: string, unit: string, text: string): boolean {
+function amountFound(raw: string, unit: string, text: string, currency: Currency | null): boolean {
   for (const v of amountConversions(raw, unit)) {
-    const near = numbersNear(text, v.value, v.tolerance);
+    // Only occurrences whose written currency (if any) is the claim's: "$100 million" ≠ "Rs 100 million".
+    const near = numbersNear(text, v.value, v.tolerance).filter((pos) =>
+      sameCurrency(currency, currencyAt(text, pos)),
+    );
     if (near.length === 0) continue;
-    const unitAfter = new RegExp(`^[\\d,.]+\\s*(?:${UNIT_WORDS[v.unit]})(?![\\p{L}])`, "iu");
+    const simple = v.unit === "lakh" || v.unit === "thousand" ? NOT_COMPOUND : "";
+    const unitAfter = new RegExp(
+      `^[\\d,.]+\\s*(?:${UNIT_WORDS[v.unit]})(?![\\p{L}])${simple}`,
+      "iu",
+    );
     if (near.some((pos) => unitAfter.test(text.slice(pos, pos + 40)))) return true;
-    if (declaresUnit(text, v.unit)) return true;
+    // A bare number counts only in a table row of a text that states this unit in the claim's currency.
+    const declared = declaredUnitCurrencies(text, v.unit);
+    if (
+      declared.some((c) => sameCurrency(currency, c)) &&
+      near.some((pos) => inTableRow(text, pos))
+    )
+      return true;
   }
   return false;
 }
 
-/** Deal stage words, strongest first. */
+/** Deal stage words, strongest first. Boilerplate ("signed", "approval") alone is not a stage. */
 const STAGES: [string, RegExp][] = [
   ["cancelled", /\b(?:cancel+ed|terminated|withdrawn|called off)\b/i],
   [
     "completed",
-    /\b(?:completed?|completion|consummated|closed the (?:acquisition|deal|transaction))\b/i,
+    /\b(?:completed|completion of|consummated|closed the (?:acquisition|deal|transaction))\b/i,
   ],
-  ["approved", /\b(?:approved?|approval|sanctioned)\b/i],
-  ["announced", /\b(?:announced?|entered into|signed|executed)\b/i],
+  [
+    "approved",
+    /\b(?:approved|sanctioned|(?:accorded|granted|received)\s+(?:its\s+|the\s+)?(?:\w+\s+)?approval)\b/i,
+  ],
+  [
+    "announced",
+    /\b(?:announced?|entered into|(?:signed|executed)\s+(?:an?|the)\s+(?:[\w-]+\s+){0,3}(?:agreement|deal|mou|memorandum|term sheet|contract))\b/i,
+  ],
   ["proposed", /\b(?:proposed?|proposal|exploring|considering|in talks|evaluat(?:e|ing))\b/i],
 ];
 
-/** Does the official text support the claim's deal stage? "not_applicable" always passes. */
+/** Words that make a stage word mean the opposite or the future ("not yet approved", "to be completed"). */
+const NEGATED_BEFORE =
+  /\b(?:not|no|never|yet to|pending|awaiting|subject to|expected to|likely to|set to|proposes? to|plans? to|intends? to|seeks? to|to be|will(?: be)?|would(?: be)?|may(?: be)?|could(?: be)?|shall(?: be)?)\s+(?:[\w-]+\s+){0,2}$/i;
+const NEGATED_AFTER =
+  /^[^\w.]*(?:(?:is|was|are|has|have|remains?)\s+)?(?:not|pending|awaited|yet to)\b/i;
+
+/** Does the official text state the claim's deal stage as a fact? "not_applicable" always passes. */
 export function stageSupported(stage: string, text: string): FigureCheck {
   if (stage === "not_applicable") return { found: true, note: "" };
   const pattern = STAGES.find(([s]) => s === stage)?.[1];
   if (!pattern) return { found: true, note: "" };
-  return pattern.test(text)
-    ? { found: true, note: "" }
-    : { found: false, note: `the deal stage "${stage}" is not stated in the official text` };
+  for (const m of text.matchAll(new RegExp(pattern.source, "gi"))) {
+    const before = text.slice(Math.max(0, m.index - 40), m.index);
+    const after = text.slice(m.index + m[0].length, m.index + m[0].length + 25);
+    if (!NEGATED_BEFORE.test(before) && !NEGATED_AFTER.test(after))
+      return { found: true, note: "" };
+  }
+  return {
+    found: false,
+    note: `the deal stage "${stage}" is not stated as a fact in the official text`,
+  };
+}
+
+/** Quarter-end month (0-based) and calendar year of "Q2 FY27" / "Q2FY2027"; null if not stated. */
+function claimedQuarterEnd(claim: string): { month: number; year: number } | null {
+  const m = claim.match(/\bQ([1-4])\s*-?\s*FY\s*'?(\d{2}|\d{4})\b/i);
+  if (!m) return null;
+  const q = Number(m[1]);
+  const fy = Number(m[2]!.length === 2 ? `20${m[2]}` : m[2]);
+  // Indian fiscal year FY27 = April 2026 – March 2027: Q1 ends June 2026 … Q4 ends March 2027.
+  return q === 4 ? { month: 2, year: fy } : { month: [5, 8, 11][q - 1]!, year: fy - 1 };
+}
+
+/**
+ * Reporting basis and period: a claim about "standalone" figures can't be confirmed by a text that
+ * is only consolidated (and vice versa), and a claim about Q2 FY27 can't be confirmed by a text whose
+ * "quarter ended …" dates are all for other quarters. Silent when the text doesn't say.
+ */
+export function basisAndPeriod(claim: string, text: string): FigureCheck {
+  const notes: string[] = [];
+  const has = (w: string) => new RegExp(`\\b${w}\\b`, "i").test(text);
+  const basis = /\bstandalone\b/i.test(claim)
+    ? "standalone"
+    : /\bconsolidated\b/i.test(claim)
+      ? "consolidated"
+      : null;
+  if (basis) {
+    const other = basis === "standalone" ? "consolidated" : "standalone";
+    if (has(other) && !has(basis))
+      notes.push(`the official text is ${other}, the claim is ${basis}`);
+  }
+  const period = claimedQuarterEnd(claim);
+  if (period) {
+    const ended = [
+      ...text.matchAll(
+        new RegExp(
+          `\\bquarter\\s+ended\\s+(?:on\\s+)?(?:\\d{1,2}(?:st|nd|rd|th)?\\s*)?(${MONTH_RE})\\.?[,\\s]+(?:\\d{1,2}(?:st|nd|rd|th)?,?\\s*)?(20\\d{2})`,
+          "gi",
+        ),
+      ),
+    ].map((m) => ({
+      month: MONTHS.findIndex((x) => m[1]!.toLowerCase().startsWith(x.slice(0, 3))),
+      year: Number(m[2]),
+    }));
+    if (ended.length > 0 && !ended.some((e) => e.month === period.month && e.year === period.year))
+      notes.push("the official text covers a different quarter than the claim");
+  }
+  return { found: notes.length === 0, note: notes.join("; ") };
 }
 
 /** Year-month a URL path or date string points to, e.g. ".../nov-2018/..." → 2018-11. */

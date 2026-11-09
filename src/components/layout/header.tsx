@@ -4,7 +4,7 @@ import { LogOut } from "lucide-react";
 import { logout } from "@/app/login/actions";
 import { AccountChip } from "@/components/layout/account-chip";
 import { BrandMark } from "@/components/layout/brand";
-import { NAV_ITEMS } from "@/components/layout/nav";
+import { MainNavLinks } from "@/components/layout/main-nav";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { cn } from "@/lib/utils";
 
@@ -32,32 +32,7 @@ export function Header() {
         </Link>
 
         <nav aria-label="Main" className="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none]">
-          <ul className="flex gap-2">
-            {NAV_ITEMS.map(({ label, href, icon: Icon, current }) => (
-              <li key={label}>
-                <Link
-                  href={href}
-                  aria-current={current ? "page" : undefined}
-                  className={cn(
-                    PILL,
-                    // Labels show from laptop width; phones and tablets get icon-only pills.
-                    "text-sm whitespace-nowrap lg:pr-4 text-muted-foreground hover:text-foreground aria-[current=page]:text-foreground",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "pill-raised grid size-8 place-items-center rounded-full",
-                      current ? "bg-primary text-primary-foreground" : "bg-muted",
-                    )}
-                  >
-                    <Icon aria-hidden className="size-4" />
-                  </span>
-                  <span className="hidden lg:inline">{label}</span>
-                  <span className="sr-only lg:hidden">{label}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          <MainNavLinks pillClassName={PILL} />
         </nav>
 
         <span className="pill-raised hidden items-center gap-2 rounded-full bg-card py-2 pr-4 pl-3 text-xs text-muted-foreground md:flex">

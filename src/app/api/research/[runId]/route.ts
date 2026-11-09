@@ -51,5 +51,5 @@ export async function DELETE(_request: Request, ctx: RouteContext<"/api/research
   if (!row) return fail(404, "not_found", "Research run not found.");
   if (isActive(row)) return fail(409, "busy", "This run is still going. Stop it first.");
   await deleteRun(runId);
-  return new Response(null, { status: 204 });
+  return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
 }

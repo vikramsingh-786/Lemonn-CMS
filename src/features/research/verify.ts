@@ -4,8 +4,8 @@ import type { ServerEnv } from "@/lib/env";
 import { pool } from "@/lib/pool";
 import { FetchError, fetchApproved, isWithinDomain } from "@/lib/safe-fetch";
 import { buildDraftQueue, meetsEvidenceBar, verificationScore } from "./draft-score";
-import { articleText, documentText, namesOrganisation, relevantExcerpt } from "./extract";
-import { checkFigure, dateHint, stageSupported } from "./figures";
+import { articleText, documentText, namesOrganisationExactly, relevantExcerpt } from "./extract";
+import { basisAndPeriod, checkFigure, dateHint, stageSupported } from "./figures";
 import {
   extractClaims,
   matchEvidence,
@@ -16,6 +16,7 @@ import {
 import {
   cachedOfficialDomain,
   domainFromFiling,
+  knownAuthorityDomain,
   searchOfficialDomain,
   type DomainCheck,
 } from "./official-domains";
@@ -55,6 +56,8 @@ const STALE_MS = 180 * 24 * 3_600_000;
 const EARNINGS_STALE_MS = 60 * 24 * 3_600_000;
 
 const EXCHANGES = ["bseindia.com", "nseindia.com"];
+/** Regulators searched for company claims (mutual funds, US filings): their pages speak for themselves. */
+const REGULATOR_HOSTS = ["amfiindia.com", "sebi.gov.in", "sec.gov"];
 /** Company claims of these types are filed with the exchanges, so filings are searched first. */
 const FILING_TYPES = new Set([
   "earnings",
@@ -97,8 +100,9 @@ const SKIP =
  * lines); a later mention means another filer's document (e.g. a supplier naming its customer).
  */
 const LETTERHEAD_CHARS = 3000;
+// Exact name: "Mahindra & Mahindra" is not Mahindra Logistics or Mahindra & Mahindra Financial Services.
 const filedBy = (text: string, company: string) =>
-  namesOrganisation(text.slice(0, LETTERHEAD_CHARS), company);
+  namesOrganisationExactly(text.slice(0, LETTERHEAD_CHARS), company);
 
 const PREFERRED =
   /investor|press|media|news|announcement|corpfiling|result|disclosure|circular|\.pdf(?:$|\?)/i;
@@ -355,7 +359,8 @@ export async function verifyStep(run: ResearchRun, env: ServerEnv): Promise<bool
       return markNotProcessed(c, `${ctx.stopReason} Not verified; retry to continue.`);
     await verifyCandidate(c, ctx);
     summarise(run);
-    void saveRun(run); // finished stories survive a cut-off step
+    // Finished stories survive a cut-off step; a failure here also fails the step's final save.
+    void saveRun(run).catch((e: unknown) => console.error("saveRun failed", run.runId, e));
   });
   pass.stopReason ??= ctx.stopReason;
   summarise(run);
@@ -447,6 +452,13 @@ async function verifyCandidate(c: CandidateReport, ctx: Ctx): Promise<void> {
     const evidence = new Map<string, Evidence>(); // by URL
     for (const cl of material) await collectOfficial(c, cl, domains, evidence, ctx);
     c.officialSources = [...domains.values()];
+    // An official document found while searching for one claim is excerpted for every claim of the
+    // same organisation: one results filing holds the profit, revenue and leadership claims alike,
+    // whichever search happened to find it (live run, 5 Nov 2026).
+    for (const e of evidence.values())
+      if (e.record.kind === "primary")
+        for (const cl of material)
+          if (cl.authority === e.record.organisation) e.claimIds.add(cl.id);
     await collectSecondary(c, material, evidence, ctx);
 
     const items = [...evidence.values()];
@@ -475,8 +487,9 @@ async function verifyCandidate(c: CandidateReport, ctx: Ctx): Promise<void> {
       e.record.excerpt = (excerpt.split(" … ")[1] ?? excerpt).slice(0, 300);
     }
     c.evidence = items.map((e) => e.record);
-    // The passages the matcher sees are kept server-side for drafting (Step 6).
-    void saveEvidence(
+    // The passages the matcher sees are kept server-side for drafting (Step 6). Awaited: a draft
+    // without its passages can't be checked, so a failed save fails this story's verification.
+    await saveEvidence(
       run.runId,
       Object.fromEntries(
         toModel.map((e) => [
@@ -513,7 +526,7 @@ async function verifyCandidate(c: CandidateReport, ctx: Ctx): Promise<void> {
       },
       ctx.reasoning,
     );
-    gate(c, material, toModel, links, domains);
+    gate(c, material, toModel, links, domains, excerpts);
   } catch (e) {
     if (e instanceof FetchError && e.kind === "budget") {
       ctx.stopReason ??= `${e.message}.`;
@@ -749,9 +762,20 @@ async function searchAndRead(
     if (isFiling && isCompany) {
       const own = page
         ? filedBy(text, cl.authority)
-        : namesOrganisation(`${r.title} ${r.snippet}`, cl.authority);
+        : namesOrganisationExactly(`${r.title} ${r.snippet}`, cl.authority);
       if (!own) continue;
     }
+    // A company's group domain also hosts its subsidiaries (mahindra.com → Mahindra Holidays): a
+    // page there that never names this company exactly is another company's, so it isn't collected
+    // (or shown) as this company's official source.
+    if (
+      isCompany &&
+      !isFiling &&
+      page &&
+      !REGULATOR_HOSTS.some((d) => isWithinDomain(host(r.url), d)) &&
+      !namesOrganisationExactly(text, cl.authority)
+    )
+      continue;
     if (!page && left.snippets <= 0) continue;
     const dated = dateHint(r.url, r.publishedAt, page ? text : "");
     evidence.set(r.url, {
@@ -815,7 +839,12 @@ async function collectSecondary(
       { query: c.headline, domains: NEWS_DOMAINS, maxResults: 3 },
       ctx.tavily,
     );
-    for (const r of results) add(r.url, r.title, `${r.title}\n${r.snippet}`, r.publishedAt);
+    // Only reports of this story: listing and topic pages ("Maruti Suzuki q2 earnings - News") share
+    // few headline words with it.
+    const headline = words(c.headline);
+    for (const r of results)
+      if (overlap(words(r.title), headline) >= SECONDARY_MIN_OVERLAP)
+        add(r.url, r.title, `${r.title}\n${r.snippet}`, r.publishedAt);
   } catch (e) {
     if (e instanceof FetchError && e.kind === "budget") throw e;
     c.evidenceSearchFailures++;
@@ -824,6 +853,8 @@ async function collectSecondary(
 }
 
 const words = (s: string) => new Set(s.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []);
+/** Share of headline words a search result's title must have to count as a report of the story. */
+const SECONDARY_MIN_OVERLAP = 0.3;
 
 function overlap(a: Set<string>, b: Set<string>): number {
   let shared = 0;
@@ -855,6 +886,31 @@ export function independentPublishers(
   return publishers.size;
 }
 
+/** Claim types whose deal stage (proposed → completed) is checked against the official text. */
+const STAGED_TYPES = new Set([
+  "acquisition",
+  "partnership",
+  "corporate_action",
+  "ipo",
+  "regulation",
+  "pricing",
+  "product_launch",
+]);
+
+/** Amounts and percentages written in a claim (with any currency in front). */
+const CLAIM_AMOUNT =
+  /(?<![\p{L}\d.,])(?:(?:us\$|[$₹€£¥]|rs\.?|inr|usd)\s*)?\d[\d,]*(?:\.\d+)?\s*(?:%|per\s?cent(?!age)|(?:lakhs?|lacs?)\s*(?:crores?|cr\.?)|thousand\s*crores?|crores?|cr\b\.?|lakhs?|lacs?|millions?|mn\b|billions?|bn\b|trillions?|tn\b)/giu;
+
+/** The claim's figures plus any amount or percentage in its text that the extractor left out. */
+export function figuresToCheck(cl: { text: string; figures: readonly string[] }): string[] {
+  const digits = (s: string) => (s.match(/\d[\d,]*(?:\.\d+)?/)?.[0] ?? "").replace(/,/g, "");
+  const listed = new Set(cl.figures.map(digits));
+  const extra = [...cl.text.matchAll(CLAIM_AMOUNT)]
+    .map((m) => m[0].trim())
+    .filter((f) => !listed.has(digits(f)));
+  return [...cl.figures, ...new Set(extra)];
+}
+
 /**
  * THE GATE: the only place claim and story statuses are decided (AI confidence never is).
  *
@@ -867,6 +923,11 @@ export function independentPublishers(
  * Story roll-up (material = high + medium claims): any conflicting → conflicting_evidence;
  * all verified → verified; any verified/partial → partially_verified; else unverified.
  * Output that is unparseable or references unknown ids → verification_failed.
+ *
+ * Figures and the stage are checked in the passage the matcher judged (`excerpts`), not anywhere in
+ * the document. Every amount and percentage written in the claim is checked, also when the
+ * extractor left it out of `figures`. The stage is checked only for deals and corporate actions.
+ * The reporting basis (standalone/consolidated) and quarter must not contradict the passage.
  */
 export function gate(
   c: CandidateReport,
@@ -874,6 +935,7 @@ export function gate(
   items: readonly Evidence[],
   links: readonly EvidenceLink[],
   domains: Map<string, DomainCheck>,
+  excerpts?: ReadonlyMap<string, string>,
 ) {
   const byId = new Map(items.map((e) => [e.record.id, e]));
   const claimIds = new Set(material.map((m) => m.id));
@@ -889,10 +951,15 @@ export function gate(
     const a = c.claims.find((x) => x.id === cl.id)!;
     const mine = links.filter((l) => l.claimId === cl.id);
     const authDomain = domains.get(cl.authority)?.domain ?? null;
+    // A regulator's or exchange's own domain speaks for it; a company's group domain hosts its
+    // subsidiaries too, so the page must name the company exactly.
+    const knownAuthority = knownAuthorityDomain(cl.authority) !== null;
     const official = (e: Evidence) =>
       e.record.kind === "primary" &&
       e.record.retrieval === "page" &&
-      ((authDomain !== null && isWithinDomain(e.record.publisher, authDomain)) ||
+      ((authDomain !== null &&
+        isWithinDomain(e.record.publisher, authDomain) &&
+        (knownAuthority || namesOrganisationExactly(e.text, cl.authority))) ||
         (e.record.sourceType === "official_filing" &&
           cl.authorityKind === "company" &&
           filedBy(e.text, cl.authority)));
@@ -904,17 +971,26 @@ export function gate(
     });
     const authSupport = supports.filter((l) => official(byId.get(l.evidenceId)!));
     const fresh = authSupport.filter((l) => !byId.get(l.evidenceId)!.record.stale);
+    const figures = figuresToCheck(cl);
     const checks = fresh.map((l) => {
-      const text = byId.get(l.evidenceId)!.text;
+      const text = excerpts?.get(l.evidenceId) ?? byId.get(l.evidenceId)!.text;
+      const missing = figures.filter((f) => !checkFigure(f, text, figures).found);
       const notes = [
-        ...cl.figures.map((f) => checkFigure(f, text, cl.figures)),
-        stageSupported(cl.stage, text),
+        ...missing.map((f) => checkFigure(f, text, figures).note),
+        ...(STAGED_TYPES.has(cl.type) ? [stageSupported(cl.stage, text)] : []),
+        basisAndPeriod(cl.text, text),
       ]
-        .filter((r) => !r.found)
-        .map((r) => r.note);
-      return { link: l, notes };
+        .map((r) => (typeof r === "string" ? r : r.found ? "" : r.note))
+        .filter(Boolean);
+      return { link: l, notes, missing };
     });
     const full = checks.find((x) => x.notes.length === 0);
+    // Figures that no official passage confirmed although the source otherwise supports the claim:
+    // drafts and articles may not print them (a filing that has the data but not this number
+    // contradicts it, e.g. a reporter's miscomputed percentage).
+    a.unconfirmedFigures = full
+      ? []
+      : figures.filter((f) => checks.length > 0 && checks.every((x) => x.missing.includes(f)));
 
     a.links = mine.map((l) => ({ evidenceId: l.evidenceId, relation: l.relation }));
     a.evidenceUrls = mine

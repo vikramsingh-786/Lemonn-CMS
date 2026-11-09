@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { runDraftChecks } from "@/features/research/draft-checks";
+import { claimFacts, runDraftChecks } from "@/features/research/draft-checks";
 import { getRun, isRunId, loadEvidence } from "@/features/research/run-store";
 import { TOPICS } from "@/features/research/topics";
 import type { DraftCheck, ResearchRun } from "@/features/research/types";
@@ -86,7 +86,8 @@ export async function checkArticle(
   return runDraftChecks(
     { ...fields, claimIdsUsed: ["edit"] },
     {
-      allowedText: [...claims.flatMap((a) => [a.claim, ...a.figures]), ...texts].join("\n"),
+      // Claim text minus figures the official source did not confirm (a reporter's wrong figure).
+      allowedText: [...claims.map(claimFacts), ...texts].join("\n"),
       givenIds: ["edit"],
       copySources: [...texts, story.headline, ...story.otherReports.map((r) => r.title)],
     },
@@ -229,6 +230,13 @@ export async function saveArticle(id: string, input: unknown, userId: string): P
   );
   const next: ArticleStatus =
     status ?? (changed && current.status === "ready" ? "draft" : current.status);
+  // A rejected article goes back to editing first; it can't jump straight to ready.
+  if (current.status === "rejected" && next === "ready")
+    return {
+      ok: false,
+      status: 422,
+      message: "Restore this article to editing before marking it ready.",
+    };
   if (next === "ready") {
     const failing = checks.filter((c) => !c.passed && BLOCKING_CHECKS.includes(c.check));
     if (failing.length > 0)

@@ -28,6 +28,7 @@ const CHECK_LABEL: Record<DraftCheck["check"], string> = {
   claim_ids: "Claim ids valid",
   no_copying: "No copied sentences",
   no_advice: "No investment advice",
+  traceable: "Every sentence traces to the evidence",
   lengths: "Field lengths",
 };
 

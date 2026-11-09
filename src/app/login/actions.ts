@@ -7,9 +7,8 @@ import {
   clientIp,
   createSession,
   endSession,
-  isLimited,
-  recordAttempt,
   safeNextPath,
+  takeAttempt,
 } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { DUMMY_HASH, verifyPassword } from "@/lib/password";
@@ -37,20 +36,25 @@ export async function login(_previous: AuthFormState, form: FormData): Promise<A
   const { email, password, next } = parsed.data;
   try {
     const ip = await clientIp();
-    const keys = [
-      { key: `email:${email}`, limit: "email" as const },
-      { key: `ip:${ip}`, limit: "ip" as const },
-    ];
-    if (await isLimited(keys))
+    // Counted before checking, so parallel guesses can't all slip under the limit. The owner's own
+    // address has the tight limit; guesses from elsewhere share the looser per-email limit, so a
+    // stranger can't lock the owner out with a few wrong passwords.
+    // Without a known address, the owner can't be told apart from others: the tight limit applies
+    // to the email itself.
+    const ownKey = `emailip:${email}|${ip ?? "unknown"}`;
+    const { limited, ids } = await takeAttempt([
+      { key: ownKey, limit: "emailIp" },
+      { key: `email:${email}`, limit: "email" },
+      ...(ip ? [{ key: `ip:${ip}`, limit: "ip" as const }] : []),
+    ]);
+    if (limited)
       return { error: "Too many failed attempts. Wait 15 minutes and try again.", values: typed };
     const user = await db().user.findUnique({ where: { email } });
     // Always run the hash check, so a missing account takes as long as a wrong password.
     const ok = await verifyPassword(password, user?.passwordHash ?? DUMMY_HASH);
-    if (!user || !ok) {
-      await recordAttempt(keys.map((k) => k.key));
-      return { error: "Wrong email or password.", values: typed };
-    }
-    await clearAttempts(`email:${email}`);
+    if (!user || !ok) return { error: "Wrong email or password.", values: typed };
+    // A successful sign-in doesn't count, and clears the owner's own recent typos.
+    await clearAttempts({ ids, keys: [ownKey] });
     await createSession(user.id);
   } catch (e) {
     console.error("sign-in failed", e);

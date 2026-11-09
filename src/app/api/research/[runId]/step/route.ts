@@ -1,6 +1,12 @@
 import { ownerBlock, runStep } from "@/features/research/pipeline";
 import { requireApi } from "@/lib/auth";
-import { claimStep, getRun, releaseStep, saveRun } from "@/features/research/run-store";
+import {
+  claimStep,
+  getRun,
+  releaseStep,
+  runWithLock,
+  saveRun,
+} from "@/features/research/run-store";
 import type { ApiErrorBody } from "@/features/research/types";
 import { serverEnv } from "@/lib/env";
 
@@ -21,7 +27,8 @@ function error(
 
 /**
  * Runs the next bounded step of a research run and returns the saved snapshot. The dashboard calls
- * this in a loop until the run is completed or failed. 409 while another request holds the run.
+ * this in a loop until the run is completed or failed. 409 while another request holds the run, or
+ * when this step's result was discarded (the run was stopped or taken over meanwhile).
  */
 export async function POST(_request: Request, ctx: RouteContext<"/api/research/[runId]/step">) {
   const auth = await requireApi("research:run");
@@ -32,15 +39,39 @@ export async function POST(_request: Request, ctx: RouteContext<"/api/research/[
   // Before taking the lock, so another account can never hold the owner's run.
   const blocked = ownerBlock(owned, auth.user, "continue");
   if (blocked) return error(403, "forbidden", blocked);
-  if (!(await claimStep(runId, LOCK_MS)))
-    return error(409, "busy", "This run is being worked on; try again shortly.", true);
+  const lock = await claimStep(runId, LOCK_MS);
+  if (!lock) return error(409, "busy", "This run is being worked on; try again shortly.", true);
   try {
-    const run = await getRun(runId); // fresh, now that this request holds the run
-    if (!run) return error(404, "not_found", "Research run not found.");
-    await runStep(run, serverEnv());
-    await saveRun(run);
-    return Response.json(run, { headers: { "Cache-Control": "no-store" } });
+    // Every save during this step (also inside verification) lands only while this lock is ours.
+    return await runWithLock(runId, lock, async () => {
+      const run = await getRun(runId, { stopAbandoned: true }); // fresh, now that we hold the run
+      if (!run) return error(404, "not_found", "Research run not found.");
+      // Finished (or cancelled meanwhile): nothing to do; the page stops on this snapshot.
+      if (["completed", "failed", "cancelled"].includes(run.stage))
+        return Response.json(run, { headers: { "Cache-Control": "no-store" } });
+      await runStep(run, serverEnv());
+      let saved: boolean;
+      try {
+        saved = await saveRun(run);
+      } catch (e) {
+        console.error("saveRun failed", runId, e);
+        return error(
+          500,
+          "internal_error",
+          "Could not save this step's progress; it will be retried.",
+          true,
+        );
+      }
+      if (!saved)
+        return error(
+          409,
+          "busy",
+          "This run was stopped or taken over while this step ran; its result was discarded.",
+          true,
+        );
+      return Response.json(run, { headers: { "Cache-Control": "no-store" } });
+    });
   } finally {
-    await releaseStep(runId);
+    await releaseStep(runId, lock);
   }
 }

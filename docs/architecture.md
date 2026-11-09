@@ -39,7 +39,8 @@ media reports"), lists them for the author, and is never marked ready for review
 and their official evidence only, then runs deterministic checks (`draft-checks.ts`).
 `POST /api/research/[runId]/verify` and `/draft` prepare a retry of only failed or unfinished
 stories; the step loop then runs it.
-The source list is fixed in `src/features/dashboard/data.ts` (on/off per browser tab).
+The source list is fixed in `src/features/dashboard/data.ts`; each source's default on/off is the
+admins' choice in `SourceSetting` (`source-settings.ts`), else the code default.
 
 Editing: an editor opens a draft from the dashboard (`Edit`), which creates an `Article` row: a
 working copy of the AI draft (the run's draft stays untouched). `/articles` lists articles across
@@ -63,8 +64,8 @@ API route `requireApi(permission)` (401 when signed out, 403 when the role lacks
 Sign-in and sign-up attempts are limited per email and per IP (`LoginAttempt`). Runs record who
 started them, articles who last saved them.
 
-Not built yet: a background worker (runs advance only while the dashboard is open),
-source management, publishing and the audit log.
+Not built yet: a background worker (runs advance only while the dashboard is open), adding or
+removing sources (only their defaults can be changed), publishing and the audit log.
 
 ## System boundaries
 
@@ -95,11 +96,11 @@ source management, publishing and the audit log.
 
 | Component       | Responsibility                                | Status                |
 | --------------- | --------------------------------------------- | --------------------- |
-| Web app         | Admin UI, server actions, input validation    | Foundation            |
-| Database        | CMS data via Prisma + PostgreSQL              | Configured, no models |
-| Authentication  | Company identity provider, admin roles        | Planned               |
+| Web app         | Admin UI, server actions, input validation    | Prototype             |
+| Database        | CMS data via Prisma + PostgreSQL              | Runs, articles, users |
+| Authentication  | Email/password accounts, roles                | Built (own accounts)  |
 | Job queue       | Durable queue between web app and worker      | Planned               |
-| Research worker | Fetch approved sources, dedupe, verify, draft | Planned               |
+| Research worker | Fetch approved sources, dedupe, verify, draft | In request steps      |
 | Publishing      | Push approved articles to Lemonn via API      | Planned               |
 
 ## Planned data flow
@@ -116,14 +117,19 @@ source management, publishing and the audit log.
 
 ```text
 src/
-  app/            Next.js routes (App Router) and API routes (api/research)
+  app/            Next.js routes (App Router): dashboard, research, runs, articles, admin
+                  (users, sources), account, login/signup; API routes (api/research,
+                  api/articles, api/sources)
   components/     Layout and shadcn/ui components (ui/)
   features/
+    articles/     Article editor, list, Markdown renderer, article store
     dashboard/    Dashboard UI and the default source list (data.ts)
     research/     Research pipeline: discovery, rank, verify, draft, run store
-  lib/            Shared utilities (env.ts, safe-fetch.ts, pool.ts, utils.ts)
+  lib/            Shared utilities (auth.ts, roles.ts, password.ts, db.ts, env.ts,
+                  safe-fetch.ts, pool.ts, utils.ts)
+  proxy.ts        Redirects requests without a session cookie to sign-in
   generated/      Prisma client (generated, gitignored)
-prisma/           Schema and, later, migrations
+prisma/           Schema and migrations
 tests/unit/       Vitest
 tests/e2e/        Playwright
 ```
