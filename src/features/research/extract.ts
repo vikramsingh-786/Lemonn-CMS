@@ -252,6 +252,35 @@ export function nameTokens(name: string): string[] {
   );
 }
 
+/** Words that may follow an organisation's name without making it a different organisation. */
+const AFTER_NAME =
+  /^(?:limited|ltd|inc|corp|corporation|company|co|plc|llp|llc|pvt|private|group|ag|sa|nv|bv|gmbh|has|had|have|is|was|were|said|says|on|in|at|for|to|today|announced|reported|board|shares|the|its|and|of|will|would|declared|posted|recorded|results?|q[1-4])$/i;
+/** Words that may come right before the name ("the", "of"), unlike another name word ("Tech" Mahindra). */
+const BEFORE_NAME = /^(?:the|of|by|for|and|from|with|a|an|in|on|to|at|that|said|says|its|their)$/i;
+
+/**
+ * True when `text` names exactly this organisation: its name tokens in order as one phrase
+ * ("Mahindra & Mahindra", "Mahindra and Mahindra"), not followed by another name word
+ * ("Mahindra & Mahindra Financial Services", "Mahindra Logistics") nor preceded by one ("Tech Mahindra").
+ */
+export function namesOrganisationExactly(text: string, name: string): boolean {
+  const tokens = nameTokens(name);
+  if (tokens.length === 0) return false;
+  const gap = "(?:[^\\p{L}\\p{N}]+(?:and|of|the)(?=[^\\p{L}\\p{N}]))*[^\\p{L}\\p{N}]+";
+  const phrase = new RegExp(
+    `(?<![\\p{L}\\p{N}])${tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(gap)}(?![\\p{L}\\p{N}])`,
+    "giu",
+  );
+  for (const m of text.matchAll(phrase)) {
+    const next = text.slice(m.index + m[0].length).match(/^[ \t]*([\p{L}]+)/u)?.[1];
+    if (next && !AFTER_NAME.test(next)) continue;
+    const prev = text.slice(0, m.index).match(/([\p{L}]+)[ \t-]+$/u)?.[1];
+    if (prev && /^\p{Lu}/u.test(prev) && !BEFORE_NAME.test(prev)) continue;
+    return true;
+  }
+  return false;
+}
+
 /** True when `text` names the organisation (every name token appears as a word). */
 export function namesOrganisation(text: string, name: string): boolean {
   const lower = text.toLowerCase();

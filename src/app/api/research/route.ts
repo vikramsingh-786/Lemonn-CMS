@@ -2,7 +2,7 @@ import { z } from "zod";
 import { requireApi } from "@/lib/auth";
 import { DEFAULT_SOURCES } from "@/features/dashboard/data";
 import { needsTavily, newRun } from "@/features/research/discovery";
-import { activeRunId, createRun, latestRunId } from "@/features/research/run-store";
+import { activeRunId, createRunIfIdle, latestRunId } from "@/features/research/run-store";
 import type { ApiErrorBody, CurrentRunResponse, StartRunResponse } from "@/features/research/types";
 import { serverEnv } from "@/lib/env";
 
@@ -72,7 +72,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const active = await activeRunId();
+  const end = new Date();
+  const start = new Date(end.getTime() - WINDOW_HOURS * 3_600_000);
+  const run = newRun(
+    enabled,
+    { start: start.toISOString(), end: end.toISOString() },
+    auth.user.name,
+  );
+  // Atomic: two simultaneous starts can't both create a run (one run at a time).
+  const active = await createRunIfIdle(run, auth.user.id);
   if (active) {
     // Say which run, so the page can show it (and keep it going) instead of a dead end.
     const body: ApiErrorBody = {
@@ -81,14 +89,6 @@ export async function POST(request: Request) {
     };
     return Response.json(body, { status: 409, headers: { "Cache-Control": "no-store" } });
   }
-  const end = new Date();
-  const start = new Date(end.getTime() - WINDOW_HOURS * 3_600_000);
-  const run = newRun(
-    enabled,
-    { start: start.toISOString(), end: end.toISOString() },
-    auth.user.name,
-  );
-  await createRun(run, auth.user.id);
   const body: StartRunResponse = { runId: run.runId };
   return Response.json(body, { status: 202, headers: { "Cache-Control": "no-store" } });
 }

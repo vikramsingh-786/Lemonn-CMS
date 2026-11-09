@@ -135,35 +135,61 @@ export async function requireApi(
   return { user };
 }
 
-/** Where to go after signing in: a same-site path only (never "//host" or a full URL). */
+/**
+ * Where to go after signing in: a same-site path only. Browsers drop tabs and newlines from URLs
+ * and read "\\" as "/", so "/\t/evil.example" or "/\\evil.example" would leave the site; any control
+ * character or backslash means "/".
+ */
 export function safeNextPath(next: string | undefined | null): string {
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\")
+  return next &&
+    next.startsWith("/") &&
+    !next.startsWith("//") &&
+    !/[\\\u0000-\u001f\u007f]/.test(next)
     ? next
     : "/";
 }
 
 /* ---------- Attempt limiting ---------- */
 
-/** Failed attempts allowed per key within the window. */
+/** Attempts allowed per key within the window (attempts are counted before they are checked). */
 export const LIMITS = {
-  /** Wrong passwords for one email address. */
-  email: { max: 5, windowMs: 15 * 60_000 },
-  /** Wrong passwords from one network address (any email). */
+  /** Sign-ins for one email from one network address (the owner's own typos). */
+  emailIp: { max: 5, windowMs: 15 * 60_000 },
+  /**
+   * Failed sign-ins for one email from anywhere. Higher than emailIp, so someone else guessing
+   * from elsewhere can't lock the owner out with 5 wrong passwords, while guessing stays capped.
+   */
+  email: { max: 20, windowMs: 15 * 60_000 },
+  /** Sign-ins from one network address (any email). */
   ip: { max: 30, windowMs: 15 * 60_000 },
-  /** New accounts from one network address. */
+  /** New accounts (and attempts at them) from one network address. */
   signup: { max: 5, windowMs: 60 * 60_000 },
 } as const;
 
-/** The caller's address (Vercel sets x-forwarded-for; the first entry is the client). */
-export async function clientIp(): Promise<string> {
+/**
+ * The caller's network address for attempt limits, or null when it isn't known. X-Forwarded-For
+ * is whatever the client sends unless a trusted proxy overwrites it, so it is used only on Vercel
+ * (which sets it) or when TRUST_PROXY_HEADERS=1 says a proxy does. Without it, per-address limits
+ * are skipped (a shared bucket would let anyone lock everyone out); per-email limits still apply.
+ */
+export async function clientIp(): Promise<string | null> {
+  if (process.env.VERCEL !== "1" && process.env.TRUST_PROXY_HEADERS !== "1") return null;
   const h = await headers();
   return (h.get("x-forwarded-for")?.split(",")[0] ?? h.get("x-real-ip") ?? "unknown").trim();
 }
 
-/** True when any key has used up its attempts in its window. */
-export async function isLimited(
+/**
+ * Records one attempt for each key, then counts: true when any key is over its limit (this attempt
+ * included). Counting after recording makes parallel attempts see each other, so a burst can't
+ * all slip under the limit. Returns the ids of the rows added (removed again on success).
+ */
+export async function takeAttempt(
   keys: { key: string; limit: keyof typeof LIMITS }[],
-): Promise<boolean> {
+): Promise<{ limited: boolean; ids: string[] }> {
+  const rows = await db().loginAttempt.createManyAndReturn({
+    data: keys.map(({ key }) => ({ key })),
+    select: { id: true },
+  });
   const counts = await Promise.all(
     keys.map(({ key, limit }) =>
       db().loginAttempt.count({
@@ -171,17 +197,18 @@ export async function isLimited(
       }),
     ),
   );
-  return counts.some((count, i) => count >= LIMITS[keys[i]!.limit].max);
-}
-
-/** Records an attempt for each key; old rows (over a day) are cleared as we go. */
-export async function recordAttempt(keys: string[]): Promise<void> {
-  await db().loginAttempt.createMany({ data: keys.map((key) => ({ key })) });
   await db().loginAttempt.deleteMany({
     where: { createdAt: { lt: new Date(Date.now() - 24 * 3_600_000) } },
   });
+  return {
+    limited: counts.some((count, i) => count > LIMITS[keys[i]!.limit].max),
+    ids: rows.map((r) => r.id),
+  };
 }
 
-export async function clearAttempts(key: string): Promise<void> {
-  await db().loginAttempt.deleteMany({ where: { key } });
+/** Forgets attempts: by row id (a successful sign-in) and/or by key. */
+export async function clearAttempts({ ids = [], keys = [] }: { ids?: string[]; keys?: string[] }) {
+  await db().loginAttempt.deleteMany({
+    where: { OR: [{ id: { in: ids } }, { key: { in: keys } }] },
+  });
 }

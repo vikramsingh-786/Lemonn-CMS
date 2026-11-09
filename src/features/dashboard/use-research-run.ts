@@ -55,6 +55,11 @@ export function useResearchRun(user: SessionUser) {
   const stopped = useRef(false);
   /** Cancel clicked while the run was still being created (no Run ID yet): done once it exists. */
   const cancelPending = useRef(false);
+  /**
+   * Bumped by every load, start and retry. A load that finishes after a newer one began (e.g. the
+   * page's initial "show the latest run" after the editor already started a new run) is discarded.
+   */
+  const generation = useRef(0);
   const router = useRouter();
   const toLogin = useCallback(() => router.push(loginUrl()), [router]);
 
@@ -135,8 +140,14 @@ export function useResearchRun(user: SessionUser) {
         setNotFound(true);
         return false;
       }
+      const gen = ++generation.current;
       const response = await fetch(`/api/research/${runId}`).catch(() => null);
       if (!mounted.current) return false;
+      // Superseded: report "handled" (not "doesn't exist"), so callers don't fall back to another run.
+      if (gen !== generation.current) {
+        void response?.body?.cancel(); // don't leave the superseded download open
+        return true;
+      }
       if (response?.status === 401) {
         toLogin();
         return false;
@@ -146,6 +157,7 @@ export function useResearchRun(user: SessionUser) {
         return false;
       }
       const snapshot = (await response.json()) as ResearchRun;
+      if (gen !== generation.current) return true; // a newer load, start or retry took over
       setRun(snapshot);
       current.current = runId;
       if (snapshot.stage === "completed") setStatus("done");
@@ -204,6 +216,7 @@ export function useResearchRun(user: SessionUser) {
   /** Starts a run for the given sources; `onCreated` gets its Run ID as soon as it exists. */
   const start = useCallback(
     async (sources: { id: string; enabled: boolean }[], onCreated?: (runId: string) => void) => {
+      generation.current++; // any load still in flight is now stale
       setStatus("running");
       setError(null);
       setNotice(null);
@@ -275,6 +288,7 @@ export function useResearchRun(user: SessionUser) {
   const retry = useCallback(
     async (stage: "verify" | "draft" | "verify-story", candidateId?: string) => {
       if (!run) return;
+      generation.current++;
       setStatus("running");
       setError(null);
       try {

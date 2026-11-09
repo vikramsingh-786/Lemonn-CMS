@@ -106,6 +106,11 @@ export type ClaimAssessment = {
   evidenceUrls: string[];
   explanation: string;
   gaps: string;
+  /**
+   * Figures of the claim that the official source supporting it does not contain (e.g. a
+   * reporter's miscomputed percentage). Drafts and articles may not state them. Absent in older runs.
+   */
+  unconfirmedFigures?: string[];
 };
 
 export type OfficialSourceCheck = {
@@ -211,7 +216,7 @@ export type ResearchDraft = {
 };
 
 export type DraftCheck = {
-  check: "figures" | "claim_ids" | "no_copying" | "no_advice" | "lengths";
+  check: "figures" | "claim_ids" | "no_copying" | "no_advice" | "traceable" | "lengths";
   passed: boolean;
   note: string;
 };

@@ -396,6 +396,8 @@ export type DraftInput = {
     authority: string;
     figures: string[];
     whyPartial: string;
+    /** Figures the official source did not confirm: never state them. */
+    unconfirmedFigures: string[];
     evidence: { organisation: string; url: string; passage: string }[];
   }[];
   unconfirmed: string[];
@@ -416,14 +418,16 @@ export type DraftOutput = z.infer<typeof draftOutput>;
 
 const DRAFT_PROMPT = `You write original news articles for Lemonn, an Indian stock-broking app, for Indian retail investors.
 
-The user message is JSON: {verifiedClaims:[{id, claim, authority, figures, evidence:[{organisation, url, passage}]}], partiallyVerifiedClaims:[{id, claim, authority, figures, whyPartial, evidence:[...]}], unconfirmed:[...], originalReport:{publisher, url, publishedAt}}.
+The user message is JSON: {verifiedClaims:[{id, claim, authority, figures, evidence:[{organisation, url, passage}]}], partiallyVerifiedClaims:[{id, claim, authority, figures, whyPartial, unconfirmedFigures, evidence:[...]}], unconfirmed:[...], originalReport:{publisher, url, publishedAt}}.
 ${UNTRUSTED}
 
 Rules:
 - State as fact ONLY what the verified claims and their evidence passages say. Never add figures, dates, names, quotes, events, causes or forecasts.
 - Items in "partiallyVerifiedClaims" are only partly confirmed (see whyPartial). Include them only with clear attribution such as "according to media reports" or "X reportedly", never as confirmed or official fact, and never attribute them to an official source. Use only their own claim text, figures and evidence passages.
+- Never state any figure listed in a claim's "unconfirmedFigures", not even with attribution: the official source does not contain it (it may be a reporter's error). Leave that detail out.
+- Do not add background, context, expectations, reactions or explanations that are not in the claims or evidence passages.
 - If there are no verifiedClaims, the headline must be attributed (for example ending with ": report").
-- Items in "unconfirmed" are NOT verified: leave them out, or say plainly that they are "not yet confirmed". Never state them as fact.
+- Items in "unconfirmed" are NOT verified: leave them out, including their figures and dates. You may say that further details are not yet confirmed, but never state an unconfirmed figure or date, not even with attribution.
 - Attribute every fact to its official source, e.g. "according to the company's filing with BSE" or "SEBI said in a circular".
 - Write in your own words. Never copy sentences from the evidence passages or from any publisher.
 - Neutral, factual tone. No investment advice, recommendations, buy/sell calls, price targets or predictions.

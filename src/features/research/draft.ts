@@ -2,7 +2,7 @@ import "server-only";
 import type { ServerEnv } from "@/lib/env";
 import { pool } from "@/lib/pool";
 import { FetchError } from "@/lib/safe-fetch";
-import { runDraftChecks } from "./draft-checks";
+import { claimFacts, runDraftChecks } from "./draft-checks";
 import { PARTIAL_REASON } from "./draft-score";
 import { relevantExcerpt } from "./extract";
 import { draftArticle, type DraftInput, type GeminiAccess } from "./gemini";
@@ -232,6 +232,7 @@ async function draftOne(
       authority: k.assessment.authority,
       figures: k.assessment.figures,
       whyPartial: k.assessment.explanation,
+      unconfirmedFigures: k.assessment.unconfirmedFigures ?? [],
       evidence: k.texts,
     })),
     unconfirmed,
@@ -241,10 +242,8 @@ async function draftOne(
   const out = await draftArticle(input, access);
   const passagesText = all.flatMap((k) => k.texts.map((t) => t.passage));
   const checks = runDraftChecks(out, {
-    allowedText: [
-      ...all.flatMap((k) => [k.assessment.claim, ...k.assessment.figures]),
-      ...passagesText,
-    ].join("\n"),
+    // Claim text minus figures the official source did not confirm (a reporter's wrong percentage).
+    allowedText: [...all.map((k) => claimFacts(k.assessment)), ...passagesText].join("\n"),
     givenIds: all.map((k) => k.kId),
     copySources: [...passagesText, c.headline, ...c.otherReports.map((r) => r.title)],
   });

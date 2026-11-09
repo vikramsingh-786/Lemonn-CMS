@@ -24,6 +24,15 @@ const schema = z
     GEMINI_MODEL: optional,
     GEMINI_MODEL_FAST: optional,
     GEMINI_MODEL_REASONING: modelId("GEMINI_MODEL_REASONING", "gemini-3.8-flash"),
+    /** Comma-separated email domains allowed to sign up (e.g. "lemonn.co.in"); unset = anyone. */
+    SIGNUP_ALLOWED_DOMAINS: optional.transform((v) =>
+      v
+        ? v
+            .split(",")
+            .map((d) => d.trim().toLowerCase().replace(/^@/, ""))
+            .filter(Boolean)
+        : undefined,
+    ),
     NEWS_RESEARCH_MAX_VERIFY: optional
       .transform((v) => (v === undefined ? 12 : Number(v)))
       .pipe(

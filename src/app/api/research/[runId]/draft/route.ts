@@ -1,34 +1,42 @@
 import { prepareDraftRetry, ownerBlock } from "@/features/research/pipeline";
 import { requireApi } from "@/lib/auth";
-import { getRun, saveRun } from "@/features/research/run-store";
+import { getRun, saveRun, withRunLock } from "@/features/research/run-store";
 import type { ApiErrorBody, StartRunResponse } from "@/features/research/types";
+
+function fail(
+  status: number,
+  code: ApiErrorBody["error"]["code"],
+  message: string,
+  retryable = false,
+) {
+  const body: ApiErrorBody = { error: { code, message, retryable } };
+  return Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
+}
 
 /**
  * (Re)draft queued stories of an existing run that have no draft or whose drafting failed (same
  * Run ID). Discovery, ranking and verification are not repeated.
- * Prepares the run; the dashboard then drives it with POST /api/research/[runId]/step.
+ * Prepares the run under its lock; the dashboard then drives it with POST /api/research/[runId]/step.
  */
 export async function POST(_request: Request, ctx: RouteContext<"/api/research/[runId]/draft">) {
   const auth = await requireApi("research:run");
   if (auth.denied) return auth.denied;
   const { runId } = await ctx.params;
-  const run = await getRun(runId);
-  const denied = run && ownerBlock(run, auth.user, "retry");
-  if (denied) {
-    const body: ApiErrorBody = { error: { code: "forbidden", message: denied, retryable: false } };
-    return Response.json(body, { status: 403, headers: { "Cache-Control": "no-store" } });
-  }
-  const blocked = run ? prepareDraftRetry(run) : "Research run not found.";
-  if (!run || blocked) {
-    const body: ApiErrorBody = {
-      error: { code: run ? "busy" : "not_found", message: blocked!, retryable: false },
-    };
-    return Response.json(body, {
-      status: run ? 409 : 404,
-      headers: { "Cache-Control": "no-store" },
-    });
-  }
-  await saveRun(run);
-  const body: StartRunResponse = { runId };
-  return Response.json(body, { status: 202, headers: { "Cache-Control": "no-store" } });
+  const owned = await getRun(runId);
+  if (!owned) return fail(404, "not_found", "Research run not found.");
+  const denied = ownerBlock(owned, auth.user, "retry");
+  if (denied) return fail(403, "forbidden", denied);
+  // Refused without touching the run (no lock) when there is nothing to draft.
+  const early = prepareDraftRetry(structuredClone(owned));
+  if (early) return fail(409, "busy", early);
+  const result = await withRunLock(runId, async () => {
+    const run = await getRun(runId, { stopAbandoned: true });
+    if (!run) return fail(404, "not_found", "Research run not found.");
+    const blocked = prepareDraftRetry(run);
+    if (blocked) return fail(409, "busy", blocked);
+    if (!(await saveRun(run))) return fail(409, "busy", "This run changed meanwhile; reload it.");
+    const body: StartRunResponse = { runId };
+    return Response.json(body, { status: 202, headers: { "Cache-Control": "no-store" } });
+  });
+  return result ?? fail(409, "busy", "This run is being worked on; try again shortly.", true);
 }
