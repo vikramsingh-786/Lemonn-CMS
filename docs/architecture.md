@@ -62,7 +62,9 @@ credits). A session is a random cookie token whose SHA-256 is the `Session` row 
 sessions. `proxy.ts` only checks that the cookie exists; every page calls `requireUser` and every
 API route `requireApi(permission)` (401 when signed out, 403 when the role lacks the permission).
 Sign-in and sign-up attempts are limited per email and per IP (`LoginAttempt`). Runs record who
-started them, articles who last saved them.
+started them, articles who last saved them. Forgotten passwords: the app sends no email, so an admin
+sets a new password on `/admin/users` (`setPassword`, not their own) and tells the person; that
+ends all of the account's sessions.
 
 Not built yet: a background worker (runs advance only while the dashboard is open), adding or
 removing sources (only their defaults can be changed), publishing and the audit log.

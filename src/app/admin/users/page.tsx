@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { ROLE_LABEL, can, toRole } from "@/lib/roles";
 import { AdminTabs } from "../admin-tabs";
+import { SetPassword } from "./set-password";
 import { RoleSelect } from "./role-select";
 
 export const metadata: Metadata = { title: "Users · Lemonn Newsroom" };
@@ -33,7 +34,7 @@ async function UsersList() {
   return (
     <section className="surface-raised overflow-hidden rounded-lg border border-border bg-card">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[40rem] text-left text-sm">
+        <table className="w-full min-w-[52rem] text-left text-sm">
           <thead className="bg-muted text-xs text-muted-foreground">
             <tr>
               <th scope="col" className="px-5 py-3 font-medium">
@@ -50,6 +51,9 @@ async function UsersList() {
               </th>
               <th scope="col" className="px-5 py-3 font-medium">
                 Last active
+              </th>
+              <th scope="col" className="px-5 py-3 font-medium">
+                Password
               </th>
             </tr>
           </thead>
@@ -78,6 +82,13 @@ async function UsersList() {
                       ? formatIst(u.sessions[0].lastSeenAt.toISOString())
                       : "Not signed in"}
                   </td>
+                  <td className="px-5 py-3">
+                    {u.id === me.id ? (
+                      <span className="text-xs text-muted-foreground">Change on Account</span>
+                    ) : (
+                      <SetPassword userId={u.id} name={u.name} />
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -97,7 +108,8 @@ export default function UsersPage() {
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground sm:text-base">
           Everyone with an account. New accounts are read-only. Pick a role to change it; it applies
           on their next page load. Admin: everything, including this page. Team: run research and
-          edit articles. Read-only: view only.
+          edit articles. Read-only: view only. Someone locked out? Set them a new password and tell
+          them what it is.
         </p>
       </div>
       <Suspense fallback={<p className="text-sm text-muted-foreground">Loading users…</p>}>
