@@ -18,7 +18,7 @@ export function LoginForm() {
       {params.get("expired") && !state.error && (
         <p
           role="status"
-          className="mt-5 rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground"
+          className="mt-5 rounded-2xl bg-muted px-5 py-3 text-sm leading-relaxed text-muted-foreground"
         >
           Your session has ended. Sign in again to continue where you left off.
         </p>
